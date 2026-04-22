@@ -10,12 +10,12 @@ html, body {
 }
 
 .page {
-  max-width: 1040px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: 18px 20px 40px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 .room-bar {
@@ -29,11 +29,7 @@ html, body {
   border-radius: 10px;
 }
 
-.room-code-group {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
+.room-code-group { display: flex; align-items: center; gap: 10px; }
 
 .room-label {
   font-size: 10px;
@@ -56,11 +52,7 @@ html, body {
   text-align: center;
 }
 
-.room-join {
-  display: flex;
-  gap: 6px;
-  margin-left: auto;
-}
+.room-join { display: flex; gap: 6px; margin-left: auto; }
 
 .room-join input {
   width: 120px;
@@ -114,6 +106,50 @@ html, body {
 
 .room-msg.info { color: #7fdaff; }
 
+.mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: #0e1628;
+  border: 1px solid #1b2747;
+  border-radius: 10px;
+  max-width: 520px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.mode-label {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: #7a88b5;
+  font-weight: 700;
+}
+
+.mode-toggle {
+  display: flex;
+  gap: 0;
+  flex: 1;
+  background: #05080f;
+  border-radius: 6px;
+  border: 1px solid #1b2747;
+  overflow: hidden;
+}
+
+.mode-btn {
+  flex: 1;
+  padding: 8px 10px;
+  background: transparent;
+  border: 0;
+  color: #8a94b3;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mode-btn:hover { background: #141d36; color: #cfe5ff; }
+.mode-btn.active { background: #4ccfff; color: #04101c; }
+
 .topstats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -155,15 +191,17 @@ html, body {
 
 .gameArea {
   display: grid;
-  grid-template-columns: 180px 1fr 180px;
-  gap: 18px;
+  grid-template-columns: 160px auto 160px;
+  gap: 16px;
   justify-content: center;
   align-items: start;
 }
 
-#board {
-  width: 300px;
-  height: 600px;
+.gameArea.split {
+  grid-template-columns: 160px auto auto 160px;
+}
+
+#board, #board2 {
   background: #05080f;
   border: 2px solid #1b2747;
   border-radius: 10px;
@@ -237,11 +275,7 @@ html, body {
   image-rendering: pixelated;
 }
 
-.next-queue {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+.next-queue { display: flex; flex-direction: column; gap: 8px; }
 
 .bottom {
   display: grid;
@@ -266,15 +300,8 @@ html, body {
   letter-spacing: 0.04em;
 }
 
-.panel p {
-  margin: 4px 0;
-  font-size: 13.5px;
-  line-height: 1.5;
-}
-
-.panel .muted {
-  color: #8a94b3;
-}
+.panel p { margin: 4px 0; font-size: 13.5px; line-height: 1.5; }
+.panel .muted { color: #8a94b3; }
 
 .ctrl-row {
   display: flex;
@@ -303,8 +330,8 @@ kbd {
   line-height: 1.2;
 }
 
-@media (max-width: 900px) {
-  .gameArea {
+@media (max-width: 960px) {
+  .gameArea, .gameArea.split {
     grid-template-columns: 1fr;
     gap: 14px;
   }

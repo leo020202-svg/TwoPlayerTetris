@@ -42,7 +42,6 @@ const wss = new WebSocketServer({ server });
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
-/** @type {Map<string, Room>} */
 const rooms = new Map();
 let nextPlayerId = 1;
 
@@ -65,6 +64,7 @@ function createRoom() {
   const code = generateCode();
   const room = {
     code,
+    mode: 'shared',
     board: emptyBoard(),
     players: {},
     order: [],
@@ -105,32 +105,61 @@ function ensureQueue(room, playerId) {
   }
 }
 
+function boardFor(room, playerId) {
+  return room.mode === 'split' ? room.players[playerId].board : room.board;
+}
+
+function endGameIfNeeded(room) {
+  if (room.mode === 'split') {
+    const allDone = room.order.length > 0 && room.order.every(id => room.players[id].gameOver);
+    if (allDone) {
+      room.gameOver = true;
+      room.running = false;
+      if (room.tickInterval) { clearInterval(room.tickInterval); room.tickInterval = null; }
+    }
+  } else {
+    room.running = false;
+    if (room.tickInterval) { clearInterval(room.tickInterval); room.tickInterval = null; }
+  }
+}
+
 function spawnPiece(room, playerId, forcedType = null) {
   const p = room.players[playerId];
   ensureQueue(room, playerId);
   const type = forcedType ?? p.queue.shift();
   ensureQueue(room, playerId);
   const slot = room.order.indexOf(playerId);
-  const x = slot === 0 ? 2 : 5;
+  const x = room.mode === 'split' ? 3 : (slot === 0 ? 2 : 5);
   const piece = { type, rot: 0, x, y: 0 };
-  if (collides(room.board, piece)) {
-    room.gameOver = true;
-    room.running = false;
-    if (room.tickInterval) { clearInterval(room.tickInterval); room.tickInterval = null; }
+  const board = boardFor(room, playerId);
+  if (collides(board, piece)) {
+    if (room.mode === 'split') {
+      p.gameOver = true;
+      endGameIfNeeded(room);
+    } else {
+      room.gameOver = true;
+      endGameIfNeeded(room);
+    }
     return null;
   }
   return piece;
 }
 
-function resolveBoardOverlap(room, p) {
+function resolveBoardOverlap(room, playerId) {
+  const p = room.players[playerId];
+  const board = boardFor(room, playerId);
   while (pieceCells(p.piece).some(([x, y]) =>
-    y >= 0 && y < ROWS && x >= 0 && x < COLS && room.board[y][x]
+    y >= 0 && y < ROWS && x >= 0 && x < COLS && board[y][x]
   )) {
     p.piece = { ...p.piece, y: p.piece.y - 1 };
     if (pieceCells(p.piece).every(([, y]) => y < 0)) {
-      room.gameOver = true;
-      room.running = false;
-      if (room.tickInterval) { clearInterval(room.tickInterval); room.tickInterval = null; }
+      if (room.mode === 'split') {
+        p.gameOver = true;
+        endGameIfNeeded(room);
+      } else {
+        room.gameOver = true;
+        endGameIfNeeded(room);
+      }
       p.piece = null;
       return false;
     }
@@ -141,44 +170,62 @@ function resolveBoardOverlap(room, p) {
 function lockPiece(room, playerId) {
   const p = room.players[playerId];
   if (!p?.piece) return;
-  if (!resolveBoardOverlap(room, p)) return;
+  if (!resolveBoardOverlap(room, playerId)) return;
+  const board = boardFor(room, playerId);
   const color = COLOR_INDEX[p.piece.type];
   for (const [x, y] of pieceCells(p.piece)) {
-    if (y >= 0 && y < ROWS && x >= 0 && x < COLS) room.board[y][x] = color;
+    if (y >= 0 && y < ROWS && x >= 0 && x < COLS) board[y][x] = color;
   }
   let cleared = 0;
   for (let r = ROWS - 1; r >= 0; r--) {
-    if (room.board[r].every(v => v !== 0)) {
-      room.board.splice(r, 1);
-      room.board.unshift(Array(COLS).fill(0));
+    if (board[r].every(v => v !== 0)) {
+      board.splice(r, 1);
+      board.unshift(Array(COLS).fill(0));
       cleared++;
       r++;
     }
   }
   if (cleared) {
-    const pts = [0, 100, 300, 500, 800][cleared] * room.level;
-    room.lines += cleared;
-    room.score += pts;
-    p.score += pts;
-    room.clearAnim = Date.now();
-    const newLevel = 1 + Math.floor(room.lines / 10);
-    if (newLevel !== room.level) {
-      room.level = newLevel;
-      restartTick(room);
+    if (room.mode === 'split') {
+      const pts = [0, 100, 300, 500, 800][cleared] * (p.level || 1);
+      p.score += pts;
+      p.lines = (p.lines || 0) + cleared;
+      const newLevel = 1 + Math.floor(p.lines / 10);
+      if (newLevel !== p.level) {
+        p.level = newLevel;
+        restartTick(room);
+      }
+      room.score = room.order.reduce((s, id) => s + (room.players[id].score || 0), 0);
+      room.lines = room.order.reduce((s, id) => s + (room.players[id].lines || 0), 0);
+      room.level = Math.max(...room.order.map(id => room.players[id].level || 1));
+    } else {
+      const pts = [0, 100, 300, 500, 800][cleared] * room.level;
+      p.score += pts;
+      room.score += pts;
+      room.lines += cleared;
+      const newLevel = 1 + Math.floor(room.lines / 10);
+      if (newLevel !== room.level) {
+        room.level = newLevel;
+        restartTick(room);
+      }
     }
+    room.clearAnim = Date.now();
   }
-  for (const otherId of room.order) {
-    if (otherId === playerId) continue;
-    const other = room.players[otherId];
-    if (!other?.piece) continue;
-    resolveBoardOverlap(room, other);
+  if (room.mode === 'shared') {
+    for (const otherId of room.order) {
+      if (otherId === playerId) continue;
+      const other = room.players[otherId];
+      if (!other?.piece) continue;
+      resolveBoardOverlap(room, otherId);
+    }
   }
   p.holdUsed = false;
   p.piece = spawnPiece(room, playerId);
 }
 
 function tickSpeedMs(room) {
-  return Math.max(100, 650 - (room.level - 1) * 55);
+  const lvl = room.level || 1;
+  return Math.max(100, 650 - (lvl - 1) * 55);
 }
 
 function restartTick(room) {
@@ -188,30 +235,30 @@ function restartTick(room) {
 
 function tryPlayerMove(room, playerId, dx, dy) {
   const p = room.players[playerId];
-  if (!p?.piece) return false;
-  const next = tryMoveShared(room.board, p.piece, dx, dy);
+  if (!p?.piece || p.gameOver) return false;
+  const next = tryMoveShared(boardFor(room, playerId), p.piece, dx, dy);
   if (next) { p.piece = next; return true; }
   return false;
 }
 
 function tryPlayerRotate(room, playerId) {
   const p = room.players[playerId];
-  if (!p?.piece) return false;
-  const next = tryRotateShared(room.board, p.piece);
+  if (!p?.piece || p.gameOver) return false;
+  const next = tryRotateShared(boardFor(room, playerId), p.piece);
   if (next) { p.piece = next; return true; }
   return false;
 }
 
 function hardDrop(room, playerId) {
   const p = room.players[playerId];
-  if (!p?.piece) return;
-  p.piece = hardDropPos(room.board, p.piece);
+  if (!p?.piece || p.gameOver) return;
+  p.piece = hardDropPos(boardFor(room, playerId), p.piece);
   lockPiece(room, playerId);
 }
 
 function doHold(room, playerId) {
   const p = room.players[playerId];
-  if (!p?.piece || p.holdUsed) return;
+  if (!p?.piece || p.holdUsed || p.gameOver) return;
   const curType = p.piece.type;
   if (p.hold) {
     const swapType = p.hold;
@@ -229,6 +276,7 @@ function tick(room) {
   for (const id of room.order) {
     const p = room.players[id];
     if (!p?.piece) continue;
+    if (p.gameOver) continue;
     if (!tryPlayerMove(room, id, 0, 1)) lockPiece(room, id);
   }
   broadcast(room);
@@ -238,7 +286,8 @@ function broadcast(room) {
   const payload = {
     type: 'state',
     code: room.code,
-    board: room.board,
+    mode: room.mode,
+    board: room.mode === 'shared' ? room.board : null,
     players: room.order.map((id, i) => {
       const pl = room.players[id];
       return {
@@ -250,6 +299,10 @@ function broadcast(room) {
         next: (pl?.queue ?? []).slice(0, 3),
         score: pl?.score ?? 0,
         lastSeq: pl?.lastSeq ?? 0,
+        board: room.mode === 'split' ? pl?.board : null,
+        lines: room.mode === 'split' ? (pl?.lines ?? 0) : null,
+        level: room.mode === 'split' ? (pl?.level ?? 1) : null,
+        gameOver: pl?.gameOver ?? false,
       };
     }),
     running: room.running,
@@ -284,6 +337,10 @@ function startGame(room) {
     p.holdUsed = false;
     p.score = 0;
     p.lastSeq = 0;
+    p.board = emptyBoard();
+    p.lines = 0;
+    p.level = 1;
+    p.gameOver = false;
     ensureQueue(room, id);
     p.piece = spawnPiece(room, id);
   }
@@ -302,6 +359,7 @@ function addPlayerToRoom(room, ws, playerId) {
   room.players[playerId] = {
     piece: null, hold: null, holdUsed: false,
     queue: [], bag: [], score: 0, lastSeq: 0,
+    board: emptyBoard(), lines: 0, level: 1, gameOver: false,
   };
   room.sockets[playerId] = ws;
   ws.roomCode = room.code;
@@ -316,6 +374,35 @@ function removePlayerFromRoom(room, playerId) {
     stopGame(room);
     room.gameOver = false;
     room.board = emptyBoard();
+    for (const id of room.order) {
+      const p = room.players[id];
+      p.board = emptyBoard();
+      p.lines = 0;
+      p.level = 1;
+      p.gameOver = false;
+    }
+  }
+}
+
+function setRoomMode(room, mode) {
+  if (mode !== 'shared' && mode !== 'split') return;
+  if (room.mode === mode) return;
+  room.mode = mode;
+  if (room.order.length === 2) {
+    startGame(room);
+  } else {
+    stopGame(room);
+    room.gameOver = false;
+    room.board = emptyBoard();
+    for (const id of room.order) {
+      const p = room.players[id];
+      p.board = emptyBoard();
+      p.lines = 0;
+      p.level = 1;
+      p.gameOver = false;
+      p.piece = null;
+    }
+    broadcast(room);
   }
 }
 
@@ -356,23 +443,14 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'join') {
       const target = typeof msg.code === 'string' ? msg.code.toUpperCase().trim() : '';
-      if (!/^[A-Z2-9]{4}$/.test(target)) {
-        sendError(ws, 'Invalid code'); return;
-      }
-      if (target === currentRoom.code) {
-        sendError(ws, "You're already in this room"); return;
-      }
+      if (!/^[A-Z2-9]{4}$/.test(target)) { sendError(ws, 'Invalid code'); return; }
+      if (target === currentRoom.code) { sendError(ws, "You're already in this room"); return; }
       const targetRoom = rooms.get(target);
-      if (!targetRoom) {
-        sendError(ws, 'Room not found'); return;
-      }
-      if (targetRoom.order.length >= 2) {
-        sendError(ws, 'Room is full'); return;
-      }
+      if (!targetRoom) { sendError(ws, 'Room not found'); return; }
+      if (targetRoom.order.length >= 2) { sendError(ws, 'Room is full'); return; }
       removePlayerFromRoom(currentRoom, playerId);
       broadcast(currentRoom);
       deleteRoomIfEmpty(currentRoom);
-
       addPlayerToRoom(targetRoom, ws, playerId);
       sendWelcome(ws, targetRoom, playerId);
       if (targetRoom.order.length === 2 && !targetRoom.running && !targetRoom.gameOver) {
@@ -391,6 +469,12 @@ wss.on('connection', (ws) => {
       addPlayerToRoom(fresh, ws, playerId);
       sendWelcome(ws, fresh, playerId);
       broadcast(fresh);
+      return;
+    }
+
+    if (msg.type === 'setMode') {
+      const newMode = msg.mode === 'split' ? 'split' : 'shared';
+      setRoomMode(currentRoom, newMode);
       return;
     }
 

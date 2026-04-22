@@ -28,6 +28,14 @@
       <div class="room-msg" id="roomMsg"></div>
     </div>
 
+    <div class="mode-bar">
+      <span class="mode-label">MODE</span>
+      <div class="mode-toggle">
+        <button type="button" id="modeShared" class="mode-btn active">Shared field</button>
+        <button type="button" id="modeSplit" class="mode-btn">Split (1v1)</button>
+      </div>
+    </div>
+
     <div class="topstats">
       <div class="stat-box">
         <h3>TEAM SCORE</h3>
@@ -69,6 +77,7 @@
       </aside>
 
       <canvas id="board" width="300" height="600"></canvas>
+      <canvas id="board2" width="240" height="480" hidden></canvas>
 
       <aside class="player-panel p2" id="p2Panel">
         <div class="player-header">
@@ -99,9 +108,9 @@
         <div class="ctrl-row muted">WASD also works. After a game over, press <kbd>R</kbd> or <kbd>Enter</kbd> to restart.</div>
       </div>
       <div class="panel">
-        <h3>How to play together</h3>
+        <h3>How to play</h3>
         <p id="statusLine">Connecting...</p>
-        <p class="muted">Share your code with a friend. They enter it on their screen and you both play on the same board. Clear 10 lines to level up.</p>
+        <p class="muted"><b>Shared field:</b> one board, pieces pass through each other mid-flight. <b>Split (1v1):</b> each player has their own 10×20 board side by side. Clear 10 lines to level up.</p>
       </div>
     </div>
   </div>

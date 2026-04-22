@@ -1,16 +1,18 @@
 import {
   COLS, ROWS, COLOR_INDEX,
-  pieceCells, collides, ghostCells,
+  pieceCells, ghostCells,
   tryMove as sharedTryMove,
   tryRotate as sharedTryRotate,
   hardDropPos,
-  SHAPES,
 } from './shared.js';
 
-const BLOCK = 30;
+const BLOCK_SHARED = 30;
+const BLOCK_SPLIT = 24;
 
-const canvas = document.getElementById('board');
-const ctx = canvas.getContext('2d');
+const canvas1 = document.getElementById('board');
+const ctx1 = canvas1.getContext('2d');
+const canvas2 = document.getElementById('board2');
+const ctx2 = canvas2.getContext('2d');
 
 const LOCKED_COLORS = [
   '#05080f',
@@ -33,14 +35,13 @@ let myId = null;
 let mySlot = -1;
 let myCode = '----';
 let state = null;
-let board = null;
 let lastClearAnim = 0;
 let flashUntil = 0;
 let highScore = Number(localStorage.getItem('tetrisHighScore') || 0);
 
-let myPredicted = null;   // locally predicted piece position
-let inputSeq = 0;         // monotonic counter for inputs we send
-let lastSentSeq = 0;      // last seq we actually sent
+let myPredicted = null;
+let inputSeq = 0;
+let lastSentSeq = 0;
 
 const roomCodeEl = document.getElementById('roomCode');
 const roomMsgEl = document.getElementById('roomMsg');
@@ -48,6 +49,9 @@ const joinInput = document.getElementById('joinInput');
 const joinForm = document.getElementById('joinForm');
 const copyBtn = document.getElementById('copyCode');
 const newRoomBtn = document.getElementById('newRoomBtn');
+const modeSharedBtn = document.getElementById('modeShared');
+const modeSplitBtn = document.getElementById('modeSplit');
+const gameAreaEl = document.querySelector('.gameArea');
 
 document.getElementById('highScore').textContent = highScore;
 
@@ -74,7 +78,7 @@ ws.addEventListener('message', (e) => {
     setRoomMsg(msg.message, 'error');
   } else if (msg.type === 'state') {
     state = msg;
-    board = msg.board;
+    applyModeLayout(state.mode);
     if (state.code && state.code !== myCode) {
       myCode = state.code;
       roomCodeEl.textContent = myCode;
@@ -93,34 +97,59 @@ ws.addEventListener('message', (e) => {
   }
 });
 
+function applyModeLayout(mode) {
+  if (mode === 'split') {
+    gameAreaEl.classList.add('split');
+    canvas2.hidden = false;
+    setCanvasSize(canvas1, BLOCK_SPLIT);
+    setCanvasSize(canvas2, BLOCK_SPLIT);
+  } else {
+    gameAreaEl.classList.remove('split');
+    canvas2.hidden = true;
+    setCanvasSize(canvas1, BLOCK_SHARED);
+  }
+  modeSharedBtn.classList.toggle('active', mode !== 'split');
+  modeSplitBtn.classList.toggle('active', mode === 'split');
+}
+
+function setCanvasSize(c, block) {
+  c.width = COLS * block;
+  c.height = ROWS * block;
+  c.style.width = (COLS * block) + 'px';
+  c.style.height = (ROWS * block) + 'px';
+}
+
+function boardForSlot(slot) {
+  if (!state) return null;
+  if (state.mode === 'split') return state.players[slot]?.board ?? null;
+  return state.board;
+}
+
+function myBoard() {
+  return boardForSlot(mySlot);
+}
+
 function reconcileMyPiece() {
   const me = state.players.find(p => p.id === myId);
-  if (!me?.piece) {
-    myPredicted = null;
-    return;
-  }
+  if (!me?.piece) { myPredicted = null; return; }
   const server = me.piece;
   if (!myPredicted
       || myPredicted.type !== server.type
       || (me.lastSeq || 0) >= lastSentSeq) {
-    // No prediction in flight: trust server completely.
     myPredicted = { type: server.type, rot: server.rot, x: server.x, y: server.y };
   }
-  // Else: keep predicted state; server hasn't caught up yet.
 }
 
-function send(action, extra = null) {
+function send(payload) {
   if (ws.readyState !== 1) return;
+  const obj = typeof payload === 'string' ? { type: payload } : payload;
+  const action = obj.type;
   if (['left','right','down','rotate','drop','hold'].includes(action)) {
     inputSeq++;
     lastSentSeq = inputSeq;
-    const payload = { type: action, seq: inputSeq };
-    if (extra) Object.assign(payload, extra);
-    ws.send(JSON.stringify(payload));
-  } else {
-    const payload = typeof action === 'string' ? { type: action } : action;
-    ws.send(JSON.stringify(payload));
+    obj.seq = inputSeq;
   }
+  ws.send(JSON.stringify(obj));
 }
 
 copyBtn.addEventListener('click', async () => {
@@ -136,10 +165,7 @@ copyBtn.addEventListener('click', async () => {
 joinForm.addEventListener('submit', (e) => {
   e.preventDefault();
   const code = joinInput.value.trim().toUpperCase();
-  if (!/^[A-Z2-9]{4}$/.test(code)) {
-    setRoomMsg('Enter a 4-letter code', 'error');
-    return;
-  }
+  if (!/^[A-Z2-9]{4}$/.test(code)) { setRoomMsg('Enter a 4-letter code', 'error'); return; }
   send({ type: 'join', code });
   joinInput.value = '';
   joinInput.blur();
@@ -151,6 +177,9 @@ newRoomBtn.addEventListener('click', () => {
   setTimeout(() => setRoomMsg(''), 1500);
 });
 
+modeSharedBtn.addEventListener('click', () => send({ type: 'setMode', mode: 'shared' }));
+modeSplitBtn.addEventListener('click', () => send({ type: 'setMode', mode: 'split' }));
+
 joinInput.addEventListener('input', () => {
   joinInput.value = joinInput.value.toUpperCase().replace(/[^A-Z2-9]/g, '').slice(0, 4);
 });
@@ -158,40 +187,39 @@ joinInput.addEventListener('input', () => {
 const DAS_MS = 140;
 const ARR_MS = 40;
 const SOFT_DROP_REPEAT = 35;
-
 const keyTimers = {};
 
 function canControl() {
-  return mySlot >= 0 && state?.running && myPredicted && board;
+  return mySlot >= 0 && state?.running && myPredicted && myBoard();
 }
 
 function attemptLocalMove(dx, dy) {
   if (!canControl()) return false;
-  const next = sharedTryMove(board, myPredicted, dx, dy);
+  const next = sharedTryMove(myBoard(), myPredicted, dx, dy);
   if (next) { myPredicted = next; return true; }
   return false;
 }
 
 function attemptLocalRotate() {
   if (!canControl()) return false;
-  const next = sharedTryRotate(board, myPredicted);
+  const next = sharedTryRotate(myBoard(), myPredicted);
   if (next) { myPredicted = next; return true; }
   return false;
 }
 
 function attemptLocalHardDrop() {
   if (!canControl()) return false;
-  myPredicted = hardDropPos(board, myPredicted);
+  myPredicted = hardDropPos(myBoard(), myPredicted);
   return true;
 }
 
 function doMove(action) {
   let moved = false;
-  if (action === 'left')   moved = attemptLocalMove(-1, 0);
+  if (action === 'left') moved = attemptLocalMove(-1, 0);
   else if (action === 'right') moved = attemptLocalMove(1, 0);
-  else if (action === 'down')  moved = attemptLocalMove(0, 1);
+  else if (action === 'down') moved = attemptLocalMove(0, 1);
   else if (action === 'rotate') moved = attemptLocalRotate();
-  else if (action === 'drop')   moved = attemptLocalHardDrop();
+  else if (action === 'drop') moved = attemptLocalHardDrop();
   send(action);
   if (moved) scheduleRender();
 }
@@ -217,21 +245,16 @@ function stopRepeat(key) {
   delete keyTimers[key];
 }
 
-function stopAllRepeats() {
-  for (const k of Object.keys(keyTimers)) stopRepeat(k);
-}
+function stopAllRepeats() { for (const k of Object.keys(keyTimers)) stopRepeat(k); }
 
 document.addEventListener('keydown', (e) => {
   const tag = document.activeElement?.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-
   if (state?.gameOver && (e.key === 'Enter' || e.key === 'r' || e.key === 'R')) {
-    send({ type: 'restart' });
-    return;
+    send({ type: 'restart' }); return;
   }
   if (mySlot < 0) return;
-  if (e.repeat) return; // we handle repeat ourselves
-
+  if (e.repeat) return;
   const k = e.key;
   if (k === 'ArrowLeft'  || k === 'a' || k === 'A') { startRepeat('L', 'left');  e.preventDefault(); }
   else if (k === 'ArrowRight' || k === 'd' || k === 'D') { startRepeat('R', 'right'); e.preventDefault(); }
@@ -254,45 +277,39 @@ let renderScheduled = false;
 function scheduleRender() {
   if (renderScheduled) return;
   renderScheduled = true;
-  requestAnimationFrame(() => {
-    renderScheduled = false;
-    render();
-  });
+  requestAnimationFrame(() => { renderScheduled = false; render(); });
 }
 
-function render() {
-  if (!state || !board) return;
+function renderBoardOnCanvas(canvas, ctx, board, pieces, block, isMySideIdx) {
   ctx.fillStyle = '#05080f';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (!board) return;
 
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const v = board[r][c];
-      if (v) drawBlock(ctx, c * BLOCK, r * BLOCK, BLOCK, LOCKED_COLORS[v], 'rgba(0,0,0,0.35)');
-      else drawGridCell(c, r);
+      if (v) drawBlock(ctx, c * block, r * block, block, LOCKED_COLORS[v], 'rgba(0,0,0,0.35)');
+      else drawGridCell(ctx, c, r, block);
     }
   }
 
-  // ghosts
-  for (const p of state.players) {
-    if (!p.piece) continue;
-    const effective = (p.id === myId && myPredicted) ? myPredicted : p.piece;
+  for (const p of pieces) {
+    const effective = p.isMe ? myPredicted : p.piece;
+    if (!effective) continue;
     const color = PLAYER_COLORS[p.slot] || '#fff';
     for (const [x, y] of ghostCells(board, effective)) {
       if (y < 0) continue;
-      drawGhost(x, y, color);
+      drawGhost(ctx, x, y, color, block);
     }
   }
 
-  // active pieces
-  for (const p of state.players) {
-    if (!p.piece) continue;
-    const effective = (p.id === myId && myPredicted) ? myPredicted : p.piece;
+  for (const p of pieces) {
+    const effective = p.isMe ? myPredicted : p.piece;
+    if (!effective) continue;
     const color = PLAYER_COLORS[p.slot] || '#fff';
-    const isMe = p.id === myId;
     for (const [x, y] of pieceCells(effective)) {
       if (y < 0) continue;
-      drawBlock(ctx, x * BLOCK, y * BLOCK, BLOCK, color, isMe ? '#fff' : 'rgba(255,255,255,0.4)');
+      drawBlock(ctx, x * block, y * block, block, color, p.isMe ? '#fff' : 'rgba(255,255,255,0.4)');
     }
   }
 
@@ -303,9 +320,35 @@ function render() {
     scheduleRender();
   }
 
-  if (state.gameOver) overlay('GAME OVER', 'Press R or Enter to restart');
-  else if (!state.running && state.playerCount < 2) {
-    overlay(`Share code: ${myCode}`, 'Waiting for player 2…');
+  const p = state.players[isMySideIdx];
+  if (state.mode === 'split' && p?.gameOver && !state.gameOver) {
+    overlayOn(ctx, canvas, 'TOPPED OUT', 'Waiting for other player...');
+  } else if (state.gameOver) {
+    overlayOn(ctx, canvas, 'GAME OVER', 'Press R or Enter to restart');
+  } else if (!state.running && state.playerCount < 2 && isMySideIdx === mySlot) {
+    overlayOn(ctx, canvas, `Share code: ${myCode}`, 'Waiting for player 2…');
+  }
+}
+
+function render() {
+  if (!state) return;
+
+  if (state.mode === 'split') {
+    const boards = [state.players[0]?.board, state.players[1]?.board];
+    for (let slot = 0; slot < 2; slot++) {
+      const c = slot === 0 ? canvas1 : canvas2;
+      const ctx = slot === 0 ? ctx1 : ctx2;
+      const pieceInfo = state.players[slot]
+        ? [{ piece: state.players[slot].piece, slot, isMe: state.players[slot].id === myId }]
+        : [];
+      renderBoardOnCanvas(c, ctx, boards[slot] || null, pieceInfo, BLOCK_SPLIT, slot);
+    }
+  } else {
+    const board = state.board;
+    const pieces = state.players.map(p => ({
+      piece: p.piece, slot: p.slot, isMe: p.id === myId,
+    }));
+    renderBoardOnCanvas(canvas1, ctx1, board, pieces, BLOCK_SHARED, mySlot);
   }
 
   for (let slot = 0; slot < 2; slot++) {
@@ -328,15 +371,15 @@ function drawBlock(g, px, py, size, fill, stroke) {
   g.fillRect(px + 2, py + 2, size - 4, Math.max(3, Math.floor(size * 0.15)));
 }
 
-function drawGhost(x, y, color) {
-  const px = x * BLOCK, py = y * BLOCK;
-  ctx.fillStyle = hexToRgba(color, 0.10);
-  ctx.fillRect(px, py, BLOCK, BLOCK);
-  ctx.strokeStyle = hexToRgba(color, 0.55);
-  ctx.lineWidth = 2;
-  ctx.setLineDash([4, 3]);
-  ctx.strokeRect(px + 2, py + 2, BLOCK - 4, BLOCK - 4);
-  ctx.setLineDash([]);
+function drawGhost(g, x, y, color, block) {
+  const px = x * block, py = y * block;
+  g.fillStyle = hexToRgba(color, 0.10);
+  g.fillRect(px, py, block, block);
+  g.strokeStyle = hexToRgba(color, 0.55);
+  g.lineWidth = 2;
+  g.setLineDash([4, 3]);
+  g.strokeRect(px + 2, py + 2, block - 4, block - 4);
+  g.setLineDash([]);
 }
 
 function hexToRgba(hex, a) {
@@ -345,10 +388,10 @@ function hexToRgba(hex, a) {
   return `rgba(${r},${g},${b},${a})`;
 }
 
-function drawGridCell(x, y) {
-  ctx.strokeStyle = '#0f1830';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x * BLOCK, y * BLOCK, BLOCK, BLOCK);
+function drawGridCell(g, x, y, block) {
+  g.strokeStyle = '#0f1830';
+  g.lineWidth = 1;
+  g.strokeRect(x * block, y * block, block, block);
 }
 
 function drawPreview(canvasId, type, accent) {
@@ -358,14 +401,12 @@ function drawPreview(canvasId, type, accent) {
   g.fillStyle = '#05080f';
   g.fillRect(0, 0, c.width, c.height);
   if (!type) return;
-
   const shape = SHAPES_PREVIEW[type];
   const h = shape.length, w = shape[0].length;
   const cell = Math.floor(Math.min((c.width - 12) / w, (c.height - 12) / h));
   const ox = Math.floor((c.width - cell * w) / 2);
   const oy = Math.floor((c.height - cell * h) / 2);
   const fill = LOCKED_COLORS[COLOR_INDEX[type]] || accent;
-
   for (let r = 0; r < h; r++) {
     for (let col = 0; col < w; col++) {
       if (!shape[r][col]) continue;
@@ -374,16 +415,16 @@ function drawPreview(canvasId, type, accent) {
   }
 }
 
-function overlay(title, subtitle) {
-  ctx.fillStyle = 'rgba(0,0,0,0.7)';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = '#fff';
-  ctx.textAlign = 'center';
-  ctx.font = 'bold 22px ui-sans-serif, system-ui, sans-serif';
-  ctx.fillText(title, canvas.width / 2, canvas.height / 2 - 8);
-  ctx.font = '14px ui-sans-serif, system-ui, sans-serif';
-  ctx.fillStyle = '#cfd4e6';
-  ctx.fillText(subtitle, canvas.width / 2, canvas.height / 2 + 20);
+function overlayOn(g, c, title, subtitle) {
+  g.fillStyle = 'rgba(0,0,0,0.7)';
+  g.fillRect(0, 0, c.width, c.height);
+  g.fillStyle = '#fff';
+  g.textAlign = 'center';
+  g.font = 'bold 18px ui-sans-serif, system-ui, sans-serif';
+  g.fillText(title, c.width / 2, c.height / 2 - 6);
+  g.font = '12px ui-sans-serif, system-ui, sans-serif';
+  g.fillStyle = '#cfd4e6';
+  g.fillText(subtitle, c.width / 2, c.height / 2 + 16);
 }
 
 function updateHUD() {
@@ -397,10 +438,11 @@ function updateHUD() {
   const parts = [];
   if (mySlot === 0) parts.push('You are Player 1 (cyan).');
   else if (mySlot === 1) parts.push('You are Player 2 (pink).');
-  if (state?.playerCount === 1) parts.push(`Alone in room ${myCode} — share the code.`);
+  if (state?.mode === 'split') parts.push('Split mode: each player has their own board.');
+  else parts.push('Shared mode: same board, pieces pass through.');
+  if (state?.playerCount === 1) parts.push(`Share code ${myCode} to start.`);
   else if (state?.playerCount === 2 && state?.running) parts.push('Playing.');
   else if (state?.gameOver) parts.push('Game over — press R or Enter to restart.');
-  else parts.push('Waiting...');
   setStatus(parts.join(' '));
 }
 
