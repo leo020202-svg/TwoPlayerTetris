@@ -187,10 +187,14 @@ function playerHalf(room, playerId) {
 }
 
 function collidesInHalf(board, piece, halfMin, halfMax) {
-  for (const [x, y] of pieceCells(piece)) {
-    if (x < halfMin || x > halfMax || y >= ROWS) return true;
+  const cells = pieceCells(piece);
+  let outside = 0;
+  for (const [x, y] of cells) {
+    if (x < 0 || x >= COLS || y >= ROWS) return true;
     if (y >= 0 && board[y][x]) return true;
+    if (x < halfMin || x > halfMax) outside++;
   }
+  if (outside * 2 > cells.length) return true;
   return false;
 }
 

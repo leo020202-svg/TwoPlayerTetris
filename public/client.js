@@ -249,15 +249,23 @@ function isDuoActionAllowed(action) {
   return mySlot === 0 ? allowedP1.has(action) : allowedP2.has(action);
 }
 
+function wouldCollideInHalf(board, piece, hMin, hMax) {
+  const cells = pieceCells(piece);
+  let outside = 0;
+  for (const [x, y] of cells) {
+    if (x < 0 || x >= COLS || y >= ROWS) return true;
+    if (y >= 0 && board[y][x]) return true;
+    if (x < hMin || x > hMax) outside++;
+  }
+  if (outside * 2 > cells.length) return true;
+  return false;
+}
+
 function localTryMove(piece, dx, dy) {
   if (state?.mode === 'split') {
     const [hMin, hMax] = halfBoundsForSlot(mySlot);
     const next = { ...piece, x: piece.x + dx, y: piece.y + dy };
-    for (const [x, y] of pieceCells(next)) {
-      if (x < hMin || x > hMax || y >= ROWS) return null;
-      if (y >= 0 && myBoard()[y][x]) return null;
-    }
-    return next;
+    return wouldCollideInHalf(myBoard(), next, hMin, hMax) ? null : next;
   }
   return sharedTryMove(myBoard(), piece, dx, dy);
 }
@@ -268,13 +276,7 @@ function localTryRotate(piece) {
     const next = { ...piece, rot: (piece.rot + 1) % 4 };
     for (const kx of [0, -1, 1, -2, 2]) {
       const test = { ...next, x: next.x + kx };
-      const cells = pieceCells(test);
-      let bad = false;
-      for (const [x, y] of cells) {
-        if (x < hMin || x > hMax || y >= ROWS) { bad = true; break; }
-        if (y >= 0 && myBoard()[y][x]) { bad = true; break; }
-      }
-      if (!bad) return test;
+      if (!wouldCollideInHalf(myBoard(), test, hMin, hMax)) return test;
     }
     return null;
   }
@@ -389,17 +391,7 @@ function ghostCellsClamped(board, piece, slot) {
   if (state?.mode === 'split') {
     const [hMin, hMax] = halfBoundsForSlot(slot);
     let dy = 0;
-    while (true) {
-      const test = { ...piece, y: piece.y + dy + 1 };
-      const cells = pieceCells(test);
-      let bad = false;
-      for (const [x, y] of cells) {
-        if (x < hMin || x > hMax || y >= ROWS) { bad = true; break; }
-        if (y >= 0 && board[y][x]) { bad = true; break; }
-      }
-      if (bad) break;
-      dy++;
-    }
+    while (!wouldCollideInHalf(board, { ...piece, y: piece.y + dy + 1 }, hMin, hMax)) dy++;
     return pieceCells({ ...piece, y: piece.y + dy });
   }
   return ghostCells(board, piece);
