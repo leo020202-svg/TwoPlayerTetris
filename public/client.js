@@ -6,13 +6,13 @@ import {
   hardDropPos,
 } from './shared.js';
 
-const BLOCK_SHARED = 30;
-const BLOCK_SPLIT = 24;
+const BLOCK = 30;
+const SPLIT_DIVIDER_COL = 5;
 
 const canvas1 = document.getElementById('board');
 const ctx1 = canvas1.getContext('2d');
 const canvas2 = document.getElementById('board2');
-const ctx2 = canvas2.getContext('2d');
+if (canvas2) canvas2.hidden = true;
 
 const LOCKED_COLORS = [
   '#05080f',
@@ -34,7 +34,7 @@ const SHAPES_PREVIEW = {
 
 const MODE_BLURBS = {
   shared: 'Shared field: one board, pieces pass through each other mid-flight.',
-  split: 'Split (1v1): each player has their own 10×20 board side by side.',
+  split: 'Split: one board, divided down the middle. P1 plays the left 5 columns, P2 the right 5. Fill full 10-wide rows together to clear lines.',
   garbage: 'Garbage Survival: every 10 seconds, a new garbage row rises from the bottom. Keep the stack down.',
   relay: 'Relay: one piece at a time. Control alternates after every lock.',
   duo: 'Duo Controls: one shared piece. P1 moves and hard-drops, P2 rotates and holds.',
@@ -71,6 +71,7 @@ const controlsDuoEl = document.getElementById('controlsDuo');
 const modeBlurbEl = document.getElementById('modeBlurb');
 const gameAreaEl = document.querySelector('.gameArea');
 
+setCanvasSize(canvas1, BLOCK);
 document.getElementById('highScore').textContent = highScore;
 
 const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -119,17 +120,10 @@ function applyModeLayout(mode) {
   const modes = ['shared', 'split', 'garbage', 'relay', 'duo', 'architect'];
   for (const m of modes) gameAreaEl.classList.remove(`mode-${m}`);
   gameAreaEl.classList.add(`mode-${mode}`);
+  gameAreaEl.classList.remove('split');
 
-  if (mode === 'split') {
-    gameAreaEl.classList.add('split');
-    canvas2.hidden = false;
-    setCanvasSize(canvas1, BLOCK_SPLIT);
-    setCanvasSize(canvas2, BLOCK_SPLIT);
-  } else {
-    gameAreaEl.classList.remove('split');
-    canvas2.hidden = true;
-    setCanvasSize(canvas1, BLOCK_SHARED);
-  }
+  if (canvas2) canvas2.hidden = true;
+  setCanvasSize(canvas1, BLOCK);
 
   [modeSharedBtn, modeSplitBtn, modeGarbageBtn, modeRelayBtn, modeDuoBtn, modeArchitectBtn]
     .forEach(b => b && b.classList.remove('active'));
@@ -153,14 +147,12 @@ function setCanvasSize(c, block) {
   c.style.height = (ROWS * block) + 'px';
 }
 
-function boardForSlot(slot) {
-  if (!state) return null;
-  if (state.mode === 'split') return state.players[slot]?.board ?? null;
-  return state.board;
+function myBoard() {
+  return state?.board ?? null;
 }
 
-function myBoard() {
-  return boardForSlot(mySlot);
+function halfBoundsForSlot(slot) {
+  return slot === 0 ? [0, SPLIT_DIVIDER_COL - 1] : [SPLIT_DIVIDER_COL, COLS - 1];
 }
 
 function reconcileMyPiece() {
@@ -257,10 +249,55 @@ function isDuoActionAllowed(action) {
   return mySlot === 0 ? allowedP1.has(action) : allowedP2.has(action);
 }
 
+function localTryMove(piece, dx, dy) {
+  if (state?.mode === 'split') {
+    const [hMin, hMax] = halfBoundsForSlot(mySlot);
+    const next = { ...piece, x: piece.x + dx, y: piece.y + dy };
+    for (const [x, y] of pieceCells(next)) {
+      if (x < hMin || x > hMax || y >= ROWS) return null;
+      if (y >= 0 && myBoard()[y][x]) return null;
+    }
+    return next;
+  }
+  return sharedTryMove(myBoard(), piece, dx, dy);
+}
+
+function localTryRotate(piece) {
+  if (state?.mode === 'split') {
+    const [hMin, hMax] = halfBoundsForSlot(mySlot);
+    const next = { ...piece, rot: (piece.rot + 1) % 4 };
+    for (const kx of [0, -1, 1, -2, 2]) {
+      const test = { ...next, x: next.x + kx };
+      const cells = pieceCells(test);
+      let bad = false;
+      for (const [x, y] of cells) {
+        if (x < hMin || x > hMax || y >= ROWS) { bad = true; break; }
+        if (y >= 0 && myBoard()[y][x]) { bad = true; break; }
+      }
+      if (!bad) return test;
+    }
+    return null;
+  }
+  return sharedTryRotate(myBoard(), piece);
+}
+
+function localHardDrop(piece) {
+  if (state?.mode === 'split') {
+    let p = piece;
+    while (true) {
+      const next = localTryMove(p, 0, 1);
+      if (!next) break;
+      p = next;
+    }
+    return p;
+  }
+  return hardDropPos(myBoard(), piece);
+}
+
 function attemptLocalMove(dx, dy) {
   if (!canControl() || !myPredicted) return false;
   if (state.mode === 'duo') return false;
-  const next = sharedTryMove(myBoard(), myPredicted, dx, dy);
+  const next = localTryMove(myPredicted, dx, dy);
   if (next) { myPredicted = next; return true; }
   return false;
 }
@@ -268,7 +305,7 @@ function attemptLocalMove(dx, dy) {
 function attemptLocalRotate() {
   if (!canControl() || !myPredicted) return false;
   if (state.mode === 'duo') return false;
-  const next = sharedTryRotate(myBoard(), myPredicted);
+  const next = localTryRotate(myPredicted);
   if (next) { myPredicted = next; return true; }
   return false;
 }
@@ -276,7 +313,7 @@ function attemptLocalRotate() {
 function attemptLocalHardDrop() {
   if (!canControl() || !myPredicted) return false;
   if (state.mode === 'duo') return false;
-  myPredicted = hardDropPos(myBoard(), myPredicted);
+  myPredicted = localHardDrop(myPredicted);
   return true;
 }
 
@@ -348,62 +385,131 @@ function scheduleRender() {
   requestAnimationFrame(() => { renderScheduled = false; render(); });
 }
 
-function renderBoardOnCanvas(canvas, ctx, board, pieces, block, isMySideIdx) {
+function ghostCellsClamped(board, piece, slot) {
+  if (state?.mode === 'split') {
+    const [hMin, hMax] = halfBoundsForSlot(slot);
+    let dy = 0;
+    while (true) {
+      const test = { ...piece, y: piece.y + dy + 1 };
+      const cells = pieceCells(test);
+      let bad = false;
+      for (const [x, y] of cells) {
+        if (x < hMin || x > hMax || y >= ROWS) { bad = true; break; }
+        if (y >= 0 && board[y][x]) { bad = true; break; }
+      }
+      if (bad) break;
+      dy++;
+    }
+    return pieceCells({ ...piece, y: piece.y + dy });
+  }
+  return ghostCells(board, piece);
+}
+
+function render() {
+  if (!state) return;
+  const board = state.board;
+  const ctx = ctx1;
+  const c = canvas1;
+
+  updateModeBanner();
+
   ctx.fillStyle = '#05080f';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (!board) return;
+  ctx.fillRect(0, 0, c.width, c.height);
 
   if (state.mode === 'architect' && state.silhouette) {
     for (const [x, y] of state.silhouette) {
       if (y < 0 || y >= ROWS || x < 0 || x >= COLS) continue;
-      const filled = board[y][x];
-      drawSilhouetteCell(ctx, x, y, block, filled);
+      const filled = board?.[y]?.[x];
+      drawSilhouetteCell(ctx, x, y, BLOCK, filled);
     }
   }
 
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      const v = board[r][c];
-      if (v) drawBlock(ctx, c * block, r * block, block, LOCKED_COLORS[v] || '#888', 'rgba(0,0,0,0.35)');
-      else if (state.mode !== 'architect' || !isSilhouetteCell(c, r)) drawGridCell(ctx, c, r, block);
+  if (board) {
+    for (let r = 0; r < ROWS; r++) {
+      for (let col = 0; col < COLS; col++) {
+        const v = board[r][col];
+        if (v) drawBlock(ctx, col * BLOCK, r * BLOCK, BLOCK, LOCKED_COLORS[v] || '#888', 'rgba(0,0,0,0.35)');
+        else if (state.mode !== 'architect' || !isSilhouetteCell(col, r)) drawGridCell(ctx, col, r, BLOCK);
+      }
     }
   }
 
-  for (const p of pieces) {
-    const effective = p.isMe ? myPredicted : p.piece;
-    if (!effective) continue;
-    const color = PLAYER_COLORS[p.slot] || '#fff';
-    for (const [x, y] of ghostCells(board, effective)) {
-      if (y < 0) continue;
-      drawGhost(ctx, x, y, color, block);
+  let pieces;
+  if (state.mode === 'duo' || state.mode === 'relay') {
+    const active = state.players.find(p => p.piece);
+    pieces = active ? [{ piece: active.piece, slot: active.slot, isMe: active.id === myId }] : [];
+  } else {
+    pieces = state.players.map(p => ({
+      piece: p.piece, slot: p.slot, isMe: p.id === myId,
+    }));
+  }
+
+  if (board) {
+    for (const p of pieces) {
+      const effective = p.isMe ? myPredicted : p.piece;
+      if (!effective) continue;
+      const color = PLAYER_COLORS[p.slot] || '#fff';
+      for (const [x, y] of ghostCellsClamped(board, effective, p.slot)) {
+        if (y < 0) continue;
+        drawGhost(ctx, x, y, color, BLOCK);
+      }
+    }
+
+    for (const p of pieces) {
+      const effective = p.isMe ? myPredicted : p.piece;
+      if (!effective) continue;
+      const color = PLAYER_COLORS[p.slot] || '#fff';
+      for (const [x, y] of pieceCells(effective)) {
+        if (y < 0) continue;
+        drawBlock(ctx, x * BLOCK, y * BLOCK, BLOCK, color, p.isMe ? '#fff' : 'rgba(255,255,255,0.4)');
+      }
     }
   }
 
-  for (const p of pieces) {
-    const effective = p.isMe ? myPredicted : p.piece;
-    if (!effective) continue;
-    const color = PLAYER_COLORS[p.slot] || '#fff';
-    for (const [x, y] of pieceCells(effective)) {
-      if (y < 0) continue;
-      drawBlock(ctx, x * block, y * block, block, color, p.isMe ? '#fff' : 'rgba(255,255,255,0.4)');
-    }
-  }
+  if (state.mode === 'split') drawDivider(ctx, c);
 
   if (performance.now() < flashUntil) {
     const alpha = (flashUntil - performance.now()) / 220;
     ctx.fillStyle = `rgba(255,255,255,${alpha * 0.35})`;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, c.width, c.height);
     scheduleRender();
   }
 
-  const p = state.players[isMySideIdx];
-  if (state.mode === 'split' && p?.gameOver && !state.gameOver) {
-    overlayOn(ctx, canvas, 'TOPPED OUT', 'Waiting for other player...');
-  } else if (state.gameOver) {
-    overlayOn(ctx, canvas, 'GAME OVER', 'Press R or Enter to restart');
-  } else if (!state.running && state.playerCount < 2 && isMySideIdx === mySlot) {
-    overlayOn(ctx, canvas, `Share code: ${myCode}`, 'Waiting for player 2…');
+  if (state.gameOver) overlayOn(ctx, c, 'GAME OVER', 'Press R or Enter to restart');
+  else if (!state.running && state.playerCount < 2) {
+    overlayOn(ctx, c, `Share code: ${myCode}`, 'Waiting for player 2…');
   }
+
+  for (let slot = 0; slot < 2; slot++) {
+    const pl = state.players[slot];
+    const prefix = `p${slot + 1}`;
+    drawPreview(`${prefix}Hold`, pl?.hold, PLAYER_COLORS[slot]);
+    for (let i = 0; i < 3; i++) {
+      drawPreview(`${prefix}Next${i}`, pl?.next?.[i], PLAYER_COLORS[slot]);
+    }
+  }
+}
+
+function drawDivider(ctx, canvas) {
+  const x = SPLIT_DIVIDER_COL * BLOCK;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x, canvas.height);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.save();
+  const grad = ctx.createLinearGradient(x - 3, 0, x + 3, 0);
+  grad.addColorStop(0, 'rgba(76,207,255,0.0)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,0.5)');
+  grad.addColorStop(1, 'rgba(255,77,109,0.0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(x - 3, 0, 6, canvas.height);
+  ctx.restore();
 }
 
 function isSilhouetteCell(x, y) {
@@ -420,45 +526,6 @@ function drawSilhouetteCell(g, x, y, block, satisfied) {
   g.setLineDash([3, 2]);
   g.strokeRect(px + 1.5, py + 1.5, block - 3, block - 3);
   g.setLineDash([]);
-}
-
-function render() {
-  if (!state) return;
-
-  updateModeBanner();
-
-  if (state.mode === 'split') {
-    const boards = [state.players[0]?.board, state.players[1]?.board];
-    for (let slot = 0; slot < 2; slot++) {
-      const c = slot === 0 ? canvas1 : canvas2;
-      const ctx = slot === 0 ? ctx1 : ctx2;
-      const pieceInfo = state.players[slot]
-        ? [{ piece: state.players[slot].piece, slot, isMe: state.players[slot].id === myId }]
-        : [];
-      renderBoardOnCanvas(c, ctx, boards[slot] || null, pieceInfo, BLOCK_SPLIT, slot);
-    }
-  } else {
-    const board = state.board;
-    let pieces;
-    if (state.mode === 'duo' || state.mode === 'relay') {
-      const active = state.players.find(p => p.piece);
-      pieces = active ? [{ piece: active.piece, slot: active.slot, isMe: active.id === myId }] : [];
-    } else {
-      pieces = state.players.map(p => ({
-        piece: p.piece, slot: p.slot, isMe: p.id === myId,
-      }));
-    }
-    renderBoardOnCanvas(canvas1, ctx1, board, pieces, BLOCK_SHARED, mySlot);
-  }
-
-  for (let slot = 0; slot < 2; slot++) {
-    const pl = state.players[slot];
-    const prefix = `p${slot + 1}`;
-    drawPreview(`${prefix}Hold`, pl?.hold, PLAYER_COLORS[slot]);
-    for (let i = 0; i < 3; i++) {
-      drawPreview(`${prefix}Next${i}`, pl?.next?.[i], PLAYER_COLORS[slot]);
-    }
-  }
 }
 
 let bannerTickHandle = null;
@@ -490,6 +557,9 @@ function updateModeBanner() {
       ? 'YOU: ROTATE + HOLD  (P1: move + hard drop)'
       : 'Duo Controls';
     kind = 'duo';
+  } else if (state.mode === 'split' && state.running) {
+    text = mySlot === 0 ? 'YOU: LEFT HALF' : mySlot === 1 ? 'YOU: RIGHT HALF' : 'Split';
+    kind = mySlot === 0 ? 'relay-p1' : 'relay-p2';
   }
   modeBannerEl.textContent = text;
   modeBannerEl.className = 'mode-banner' + (kind ? ` ${kind}` : '');

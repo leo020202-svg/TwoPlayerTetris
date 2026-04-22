@@ -50,95 +50,36 @@ const GAME_ACTIONS = new Set(['left', 'right', 'down', 'rotate', 'drop', 'hold']
 
 const GARBAGE_INTERVAL_MS = 10000;
 const GARBAGE_COLOR = 8;
+const SPLIT_DIVIDER_COL = 5;
 
 const SILHOUETTES = {
   heart: [
-    '..........',
-    '..........',
-    '..........',
-    '..........',
-    '..........',
-    '..........',
-    '..........',
-    '..........',
-    '..##.##...',
-    '.#######..',
-    '.#######..',
-    '.#######..',
-    '..#####...',
-    '...###....',
-    '....#.....',
-    '..........',
-    '..........',
-    '..........',
-    '..........',
-    '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '..##.##...', '.#######..', '.#######..', '.#######..',
+    '..#####...', '...###....', '....#.....', '..........',
+    '..........', '..........', '..........', '..........',
   ],
   smiley: [
-    '..........',
-    '..........',
-    '..........',
-    '..........',
-    '..........',
-    '..........',
-    '..........',
-    '..########',
-    '.#........',
-    '#.........',
-    '#..#...#..',
-    '#.........',
-    '#.#.....#.',
-    '#..#####..',
-    '.#........',
-    '..########',
-    '..........',
-    '..........',
-    '..........',
-    '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..########',
+    '.#........', '#.........', '#..#...#..', '#.........',
+    '#.#.....#.', '#..#####..', '.#........', '..########',
+    '..........', '..........', '..........', '..........',
   ],
   letterA: [
-    '..........',
-    '..........',
-    '..........',
-    '..........',
-    '..........',
-    '..........',
-    '..........',
-    '....##....',
-    '...####...',
-    '..##..##..',
-    '..##..##..',
-    '..######..',
-    '..######..',
-    '..##..##..',
-    '..##..##..',
-    '..##..##..',
-    '..........',
-    '..........',
-    '..........',
-    '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '....##....',
+    '...####...', '..##..##..', '..##..##..', '..######..',
+    '..######..', '..##..##..', '..##..##..', '..##..##..',
+    '..........', '..........', '..........', '..........',
   ],
   arrow: [
-    '..........',
-    '..........',
-    '..........',
-    '..........',
-    '....##....',
-    '...####...',
-    '..######..',
-    '.########.',
-    '....##....',
-    '....##....',
-    '....##....',
-    '....##....',
-    '....##....',
-    '....##....',
-    '....##....',
-    '....##....',
-    '..........',
-    '..........',
-    '..........',
-    '..........',
+    '..........', '..........', '..........', '..........',
+    '....##....', '...####...', '..######..', '.########.',
+    '....##....', '....##....', '....##....', '....##....',
+    '....##....', '....##....', '....##....', '....##....',
+    '..........', '..........', '..........', '..........',
   ],
 };
 
@@ -240,22 +181,47 @@ function ensureQueue(room, playerId) {
   }
 }
 
-function boardFor(room, playerId) {
-  return room.mode === 'split' ? room.players[playerId].board : room.board;
+function playerHalf(room, playerId) {
+  const slot = room.order.indexOf(playerId);
+  return slot === 0 ? [0, SPLIT_DIVIDER_COL - 1] : [SPLIT_DIVIDER_COL, COLS - 1];
+}
+
+function collidesInHalf(board, piece, halfMin, halfMax) {
+  for (const [x, y] of pieceCells(piece)) {
+    if (x < halfMin || x > halfMax || y >= ROWS) return true;
+    if (y >= 0 && board[y][x]) return true;
+  }
+  return false;
+}
+
+function tryMoveInHalf(board, piece, dx, dy, halfMin, halfMax) {
+  const next = { ...piece, x: piece.x + dx, y: piece.y + dy };
+  if (!collidesInHalf(board, next, halfMin, halfMax)) return next;
+  return null;
+}
+
+function tryRotateInHalf(board, piece, halfMin, halfMax) {
+  const next = { ...piece, rot: (piece.rot + 1) % 4 };
+  for (const kx of [0, -1, 1, -2, 2]) {
+    const test = { ...next, x: next.x + kx };
+    if (!collidesInHalf(board, test, halfMin, halfMax)) return test;
+  }
+  return null;
+}
+
+function hardDropPosInHalf(board, piece, halfMin, halfMax) {
+  let p = piece;
+  while (true) {
+    const next = { ...p, y: p.y + 1 };
+    if (collidesInHalf(board, next, halfMin, halfMax)) break;
+    p = next;
+  }
+  return p;
 }
 
 function endGameIfNeeded(room) {
-  if (room.mode === 'split') {
-    const allDone = room.order.length > 0 && room.order.every(id => room.players[id].gameOver);
-    if (allDone) {
-      room.gameOver = true;
-      room.running = false;
-      clearRoomTimers(room);
-    }
-  } else {
-    room.running = false;
-    clearRoomTimers(room);
-  }
+  room.running = false;
+  clearRoomTimers(room);
 }
 
 function spawnPiece(room, playerId, forcedType = null) {
@@ -265,19 +231,20 @@ function spawnPiece(room, playerId, forcedType = null) {
   ensureQueue(room, playerId);
   const slot = room.order.indexOf(playerId);
   let x;
-  if (room.mode === 'split') x = 3;
+  if (room.mode === 'split') x = slot === 0 ? 1 : 6;
   else if (room.mode === 'relay' || room.mode === 'duo' || room.mode === 'architect' || room.mode === 'garbage') x = 3;
   else x = slot === 0 ? 2 : 5;
   const piece = { type, rot: 0, x, y: 0 };
-  const board = boardFor(room, playerId);
-  if (collides(board, piece)) {
-    if (room.mode === 'split') {
-      p.gameOver = true;
-      endGameIfNeeded(room);
-    } else {
-      room.gameOver = true;
-      endGameIfNeeded(room);
-    }
+  let bad = false;
+  if (room.mode === 'split') {
+    const [hMin, hMax] = playerHalf(room, playerId);
+    bad = collidesInHalf(room.board, piece, hMin, hMax);
+  } else {
+    bad = collides(room.board, piece);
+  }
+  if (bad) {
+    room.gameOver = true;
+    endGameIfNeeded(room);
     return null;
   }
   return piece;
@@ -285,19 +252,13 @@ function spawnPiece(room, playerId, forcedType = null) {
 
 function resolveBoardOverlap(room, playerId) {
   const p = room.players[playerId];
-  const board = boardFor(room, playerId);
   while (pieceCells(p.piece).some(([x, y]) =>
-    y >= 0 && y < ROWS && x >= 0 && x < COLS && board[y][x]
+    y >= 0 && y < ROWS && x >= 0 && x < COLS && room.board[y][x]
   )) {
     p.piece = { ...p.piece, y: p.piece.y - 1 };
     if (pieceCells(p.piece).every(([, y]) => y < 0)) {
-      if (room.mode === 'split') {
-        p.gameOver = true;
-        endGameIfNeeded(room);
-      } else {
-        room.gameOver = true;
-        endGameIfNeeded(room);
-      }
+      room.gameOver = true;
+      endGameIfNeeded(room);
       p.piece = null;
       return false;
     }
@@ -309,54 +270,37 @@ function lockPiece(room, playerId) {
   const p = room.players[playerId];
   if (!p?.piece) return;
   if (!resolveBoardOverlap(room, playerId)) return;
-  const board = boardFor(room, playerId);
   const color = COLOR_INDEX[p.piece.type];
   for (const [x, y] of pieceCells(p.piece)) {
-    if (y >= 0 && y < ROWS && x >= 0 && x < COLS) board[y][x] = color;
+    if (y >= 0 && y < ROWS && x >= 0 && x < COLS) room.board[y][x] = color;
   }
   let cleared = 0;
   for (let r = ROWS - 1; r >= 0; r--) {
-    if (board[r].every(v => v !== 0)) {
-      board.splice(r, 1);
-      board.unshift(Array(COLS).fill(0));
+    if (room.board[r].every(v => v !== 0)) {
+      room.board.splice(r, 1);
+      room.board.unshift(Array(COLS).fill(0));
       cleared++;
       r++;
     }
   }
   if (cleared) {
-    if (room.mode === 'split') {
-      const pts = [0, 100, 300, 500, 800][cleared] * (p.level || 1);
-      p.score += pts;
-      p.lines = (p.lines || 0) + cleared;
-      const newLevel = 1 + Math.floor(p.lines / 10);
-      if (newLevel !== p.level) {
-        p.level = newLevel;
-        restartTick(room);
-      }
-      room.score = room.order.reduce((s, id) => s + (room.players[id].score || 0), 0);
-      room.lines = room.order.reduce((s, id) => s + (room.players[id].lines || 0), 0);
-      room.level = Math.max(...room.order.map(id => room.players[id].level || 1));
-    } else {
-      const pts = [0, 100, 300, 500, 800][cleared] * room.level;
-      p.score += pts;
-      room.score += pts;
-      room.lines += cleared;
-      const newLevel = 1 + Math.floor(room.lines / 10);
-      if (newLevel !== room.level) {
-        room.level = newLevel;
-        restartTick(room);
-      }
+    const pts = [0, 100, 300, 500, 800][cleared] * room.level;
+    p.score += pts;
+    room.score += pts;
+    room.lines += cleared;
+    const newLevel = 1 + Math.floor(room.lines / 10);
+    if (newLevel !== room.level) {
+      room.level = newLevel;
+      restartTick(room);
     }
     room.clearAnim = Date.now();
   }
 
-  if (room.mode === 'shared' || room.mode === 'garbage' || room.mode === 'architect') {
-    for (const otherId of room.order) {
-      if (otherId === playerId) continue;
-      const other = room.players[otherId];
-      if (!other?.piece) continue;
-      resolveBoardOverlap(room, otherId);
-    }
+  for (const otherId of room.order) {
+    if (otherId === playerId) continue;
+    const other = room.players[otherId];
+    if (!other?.piece) continue;
+    resolveBoardOverlap(room, otherId);
   }
 
   p.holdUsed = false;
@@ -387,30 +331,47 @@ function restartTick(room) {
 
 function tryPlayerMove(room, playerId, dx, dy) {
   const p = room.players[playerId];
-  if (!p?.piece || p.gameOver) return false;
-  const next = tryMoveShared(boardFor(room, playerId), p.piece, dx, dy);
+  if (!p?.piece) return false;
+  let next;
+  if (room.mode === 'split') {
+    const [hMin, hMax] = playerHalf(room, playerId);
+    next = tryMoveInHalf(room.board, p.piece, dx, dy, hMin, hMax);
+  } else {
+    next = tryMoveShared(room.board, p.piece, dx, dy);
+  }
   if (next) { p.piece = next; return true; }
   return false;
 }
 
 function tryPlayerRotate(room, playerId) {
   const p = room.players[playerId];
-  if (!p?.piece || p.gameOver) return false;
-  const next = tryRotateShared(boardFor(room, playerId), p.piece);
+  if (!p?.piece) return false;
+  let next;
+  if (room.mode === 'split') {
+    const [hMin, hMax] = playerHalf(room, playerId);
+    next = tryRotateInHalf(room.board, p.piece, hMin, hMax);
+  } else {
+    next = tryRotateShared(room.board, p.piece);
+  }
   if (next) { p.piece = next; return true; }
   return false;
 }
 
 function hardDrop(room, playerId) {
   const p = room.players[playerId];
-  if (!p?.piece || p.gameOver) return;
-  p.piece = hardDropPos(boardFor(room, playerId), p.piece);
+  if (!p?.piece) return;
+  if (room.mode === 'split') {
+    const [hMin, hMax] = playerHalf(room, playerId);
+    p.piece = hardDropPosInHalf(room.board, p.piece, hMin, hMax);
+  } else {
+    p.piece = hardDropPos(room.board, p.piece);
+  }
   lockPiece(room, playerId);
 }
 
 function doHold(room, playerId) {
   const p = room.players[playerId];
-  if (!p?.piece || p.holdUsed || p.gameOver) return;
+  if (!p?.piece || p.holdUsed) return;
   const curType = p.piece.type;
   if (p.hold) {
     const swapType = p.hold;
@@ -428,7 +389,6 @@ function tick(room) {
   for (const id of room.order) {
     const p = room.players[id];
     if (!p?.piece) continue;
-    if (p.gameOver) continue;
     if (!tryPlayerMove(room, id, 0, 1)) lockPiece(room, id);
   }
   broadcast(room);
@@ -441,8 +401,7 @@ function raiseGarbage(room) {
   }
   if (room.board[0].some(v => v)) {
     room.gameOver = true;
-    room.running = false;
-    clearRoomTimers(room);
+    endGameIfNeeded(room);
     broadcast(room);
     return;
   }
@@ -464,8 +423,7 @@ function broadcast(room) {
     type: 'state',
     code: room.code,
     mode: room.mode,
-    board: room.mode === 'shared' || room.mode === 'garbage' || room.mode === 'relay' || room.mode === 'duo' || room.mode === 'architect'
-      ? room.board : null,
+    board: room.board,
     players: room.order.map((id, i) => {
       const pl = room.players[id];
       return {
@@ -477,10 +435,6 @@ function broadcast(room) {
         next: (pl?.queue ?? []).slice(0, 3),
         score: pl?.score ?? 0,
         lastSeq: pl?.lastSeq ?? 0,
-        board: room.mode === 'split' ? pl?.board : null,
-        lines: room.mode === 'split' ? (pl?.lines ?? 0) : null,
-        level: room.mode === 'split' ? (pl?.level ?? 1) : null,
-        gameOver: pl?.gameOver ?? false,
       };
     }),
     running: room.running,
@@ -533,10 +487,6 @@ function startGame(room) {
     p.holdUsed = false;
     p.score = 0;
     p.lastSeq = 0;
-    p.board = emptyBoard();
-    p.lines = 0;
-    p.level = 1;
-    p.gameOver = false;
     p.piece = null;
     ensureQueue(room, id);
   }
@@ -573,7 +523,6 @@ function addPlayerToRoom(room, ws, playerId) {
   room.players[playerId] = {
     piece: null, hold: null, holdUsed: false,
     queue: [], bag: [], score: 0, lastSeq: 0,
-    board: emptyBoard(), lines: 0, level: 1, gameOver: false,
   };
   room.sockets[playerId] = ws;
   ws.roomCode = room.code;
@@ -590,10 +539,6 @@ function removePlayerFromRoom(room, playerId) {
     room.board = emptyBoard();
     for (const id of room.order) {
       const p = room.players[id];
-      p.board = emptyBoard();
-      p.lines = 0;
-      p.level = 1;
-      p.gameOver = false;
       p.piece = null;
     }
   }
@@ -612,12 +557,7 @@ function setRoomMode(room, mode) {
     room.silhouette = null;
     room.activeController = null;
     for (const id of room.order) {
-      const p = room.players[id];
-      p.board = emptyBoard();
-      p.lines = 0;
-      p.level = 1;
-      p.gameOver = false;
-      p.piece = null;
+      room.players[id].piece = null;
     }
     broadcast(room);
   }
