@@ -33,6 +33,10 @@
       <div class="mode-toggle">
         <button type="button" id="modeShared" class="mode-btn active">Shared field</button>
         <button type="button" id="modeSplit" class="mode-btn">Split (1v1)</button>
+        <button type="button" id="modeGarbage" class="mode-btn">Garbage Survival</button>
+        <button type="button" id="modeRelay" class="mode-btn">Relay</button>
+        <button type="button" id="modeDuo" class="mode-btn">Duo Controls</button>
+        <button type="button" id="modeArchitect" class="mode-btn">Architect</button>
       </div>
     </div>
 
@@ -54,6 +58,8 @@
         <div class="value" id="highScore">0</div>
       </div>
     </div>
+
+    <div class="mode-banner" id="modeBanner" hidden></div>
 
     <div class="gameArea">
       <aside class="player-panel p1" id="p1Panel">
@@ -103,14 +109,21 @@
     <div class="bottom">
       <div class="panel">
         <h3>Controls</h3>
-        <div class="ctrl-row"><kbd>&larr;</kbd><kbd>&rarr;</kbd> move <kbd>&uarr;</kbd> rotate <kbd>&darr;</kbd> soft drop</div>
-        <div class="ctrl-row"><kbd>Space</kbd> hard drop <kbd>C</kbd> or <kbd>Shift</kbd> hold</div>
-        <div class="ctrl-row muted">WASD also works. After a game over, press <kbd>R</kbd> or <kbd>Enter</kbd> to restart.</div>
+        <div id="controlsDefault">
+          <div class="ctrl-row"><kbd>&larr;</kbd><kbd>&rarr;</kbd> move <kbd>&uarr;</kbd> rotate <kbd>&darr;</kbd> soft drop</div>
+          <div class="ctrl-row"><kbd>Space</kbd> hard drop <kbd>C</kbd> or <kbd>Shift</kbd> hold</div>
+          <div class="ctrl-row muted">WASD also works. After a game over, press <kbd>R</kbd> or <kbd>Enter</kbd> to restart.</div>
+        </div>
+        <div id="controlsDuo" hidden>
+          <div class="ctrl-row"><span class="p1tag">P1</span> <kbd>&larr;</kbd><kbd>&rarr;</kbd> move <kbd>&darr;</kbd> soft drop <kbd>Space</kbd> hard drop</div>
+          <div class="ctrl-row"><span class="p2tag">P2</span> <kbd>&uarr;</kbd> rotate <kbd>&darr;</kbd> soft drop <kbd>C</kbd>/<kbd>Shift</kbd> hold</div>
+          <div class="ctrl-row muted">One piece. Two players. Cooperate.</div>
+        </div>
       </div>
       <div class="panel">
         <h3>How to play</h3>
         <p id="statusLine">Connecting...</p>
-        <p class="muted"><b>Shared field:</b> one board, pieces pass through each other mid-flight. <b>Split (1v1):</b> each player has their own 10×20 board side by side. Clear 10 lines to level up.</p>
+        <p class="muted" id="modeBlurb"></p>
       </div>
     </div>
   </div>

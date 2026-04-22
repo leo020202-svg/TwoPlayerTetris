@@ -114,9 +114,9 @@ html, body {
   background: #0e1628;
   border: 1px solid #1b2747;
   border-radius: 10px;
-  max-width: 520px;
   margin: 0 auto;
   width: 100%;
+  max-width: 1040px;
 }
 
 .mode-label {
@@ -124,31 +124,82 @@ html, body {
   letter-spacing: 0.18em;
   color: #7a88b5;
   font-weight: 700;
+  flex-shrink: 0;
 }
 
 .mode-toggle {
   display: flex;
-  gap: 0;
+  gap: 4px;
   flex: 1;
   background: #05080f;
   border-radius: 6px;
   border: 1px solid #1b2747;
-  overflow: hidden;
+  padding: 3px;
+  flex-wrap: wrap;
 }
 
 .mode-btn {
   flex: 1;
-  padding: 8px 10px;
+  min-width: 110px;
+  padding: 6px 10px;
   background: transparent;
   border: 0;
   color: #8a94b3;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
+  border-radius: 4px;
 }
 
 .mode-btn:hover { background: #141d36; color: #cfe5ff; }
 .mode-btn.active { background: #4ccfff; color: #04101c; }
+
+.mode-banner {
+  margin: 0 auto;
+  padding: 8px 14px;
+  background: #0e1628;
+  border: 1px solid #1b2747;
+  border-radius: 8px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  font-size: 15px;
+  text-align: center;
+  min-width: 240px;
+}
+
+.mode-banner.garbage {
+  color: #ffd93d;
+  border-color: rgba(255,217,61,0.5);
+  box-shadow: 0 0 0 1px rgba(255,217,61,0.2);
+}
+
+.mode-banner.relay-p1 {
+  color: #04101c;
+  background: #4ccfff;
+  border-color: #4ccfff;
+}
+
+.mode-banner.relay-p2 {
+  color: #2a0510;
+  background: #ff4d6d;
+  border-color: #ff4d6d;
+}
+
+.mode-banner.relay-wait {
+  color: #8a94b3;
+  border-color: #1b2747;
+  opacity: 0.7;
+}
+
+.mode-banner.architect {
+  color: #ffd93d;
+  border-color: rgba(255,217,61,0.5);
+}
+
+.mode-banner.duo {
+  color: #7fdaff;
+  border-color: rgba(127,218,255,0.4);
+}
 
 .topstats {
   display: grid;
@@ -314,6 +365,9 @@ html, body {
 
 .ctrl-row.muted { color: #8a94b3; }
 
+.p1tag { color: #4ccfff; font-weight: 800; font-size: 12px; letter-spacing: 0.1em; }
+.p2tag { color: #ff4d6d; font-weight: 800; font-size: 12px; letter-spacing: 0.1em; }
+
 kbd {
   display: inline-block;
   min-width: 22px;
@@ -340,4 +394,5 @@ kbd {
   .bottom { grid-template-columns: 1fr; }
   .room-join { margin-left: 0; flex-basis: 100%; }
   .room-join input { flex: 1; }
+  .mode-toggle { flex-wrap: wrap; }
 }

@@ -41,6 +41,132 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server });
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const VALID_MODES = ['shared', 'split', 'garbage', 'relay', 'duo', 'architect'];
+
+const DUO_P1_ACTIONS = new Set(['left', 'right', 'down', 'drop']);
+const DUO_P2_ACTIONS = new Set(['rotate', 'hold', 'down']);
+
+const GAME_ACTIONS = new Set(['left', 'right', 'down', 'rotate', 'drop', 'hold']);
+
+const GARBAGE_INTERVAL_MS = 10000;
+const GARBAGE_COLOR = 8;
+
+const SILHOUETTES = {
+  heart: [
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+    '..##.##...',
+    '.#######..',
+    '.#######..',
+    '.#######..',
+    '..#####...',
+    '...###....',
+    '....#.....',
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+  ],
+  smiley: [
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+    '..########',
+    '.#........',
+    '#.........',
+    '#..#...#..',
+    '#.........',
+    '#.#.....#.',
+    '#..#####..',
+    '.#........',
+    '..########',
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+  ],
+  letterA: [
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+    '....##....',
+    '...####...',
+    '..##..##..',
+    '..##..##..',
+    '..######..',
+    '..######..',
+    '..##..##..',
+    '..##..##..',
+    '..##..##..',
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+  ],
+  arrow: [
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+    '....##....',
+    '...####...',
+    '..######..',
+    '.########.',
+    '....##....',
+    '....##....',
+    '....##....',
+    '....##....',
+    '....##....',
+    '....##....',
+    '....##....',
+    '....##....',
+    '..........',
+    '..........',
+    '..........',
+    '..........',
+  ],
+};
+
+function silhouetteCells(pattern) {
+  const cells = [];
+  for (let y = 0; y < pattern.length; y++) {
+    const row = pattern[y];
+    for (let x = 0; x < row.length; x++) {
+      if (row[x] === '#') cells.push([x, y]);
+    }
+  }
+  return cells;
+}
+
+function pickSilhouette() {
+  const keys = Object.keys(SILHOUETTES);
+  const key = keys[Math.floor(Math.random() * keys.length)];
+  return { name: key, cells: silhouetteCells(SILHOUETTES[key]) };
+}
+
+function silhouetteProgress(room) {
+  if (!room.silhouette) return { filled: 0, total: 0 };
+  let filled = 0;
+  for (const [x, y] of room.silhouette.cells) {
+    if (y >= 0 && y < ROWS && x >= 0 && x < COLS && room.board[y][x]) filled++;
+  }
+  return { filled, total: room.silhouette.cells.length, name: room.silhouette.name };
+}
 
 const rooms = new Map();
 let nextPlayerId = 1;
@@ -76,6 +202,10 @@ function createRoom() {
     level: 1,
     clearAnim: 0,
     tickInterval: null,
+    garbageInterval: null,
+    nextGarbageAt: 0,
+    activeController: null,
+    silhouette: null,
   };
   rooms.set(code, room);
   return room;
@@ -83,9 +213,14 @@ function createRoom() {
 
 function deleteRoomIfEmpty(room) {
   if (room.order.length === 0) {
-    if (room.tickInterval) clearInterval(room.tickInterval);
+    clearRoomTimers(room);
     rooms.delete(room.code);
   }
+}
+
+function clearRoomTimers(room) {
+  if (room.tickInterval) { clearInterval(room.tickInterval); room.tickInterval = null; }
+  if (room.garbageInterval) { clearInterval(room.garbageInterval); room.garbageInterval = null; }
 }
 
 function shuffle(arr) {
@@ -115,11 +250,11 @@ function endGameIfNeeded(room) {
     if (allDone) {
       room.gameOver = true;
       room.running = false;
-      if (room.tickInterval) { clearInterval(room.tickInterval); room.tickInterval = null; }
+      clearRoomTimers(room);
     }
   } else {
     room.running = false;
-    if (room.tickInterval) { clearInterval(room.tickInterval); room.tickInterval = null; }
+    clearRoomTimers(room);
   }
 }
 
@@ -129,7 +264,10 @@ function spawnPiece(room, playerId, forcedType = null) {
   const type = forcedType ?? p.queue.shift();
   ensureQueue(room, playerId);
   const slot = room.order.indexOf(playerId);
-  const x = room.mode === 'split' ? 3 : (slot === 0 ? 2 : 5);
+  let x;
+  if (room.mode === 'split') x = 3;
+  else if (room.mode === 'relay' || room.mode === 'duo' || room.mode === 'architect' || room.mode === 'garbage') x = 3;
+  else x = slot === 0 ? 2 : 5;
   const piece = { type, rot: 0, x, y: 0 };
   const board = boardFor(room, playerId);
   if (collides(board, piece)) {
@@ -211,7 +349,8 @@ function lockPiece(room, playerId) {
     }
     room.clearAnim = Date.now();
   }
-  if (room.mode === 'shared') {
+
+  if (room.mode === 'shared' || room.mode === 'garbage' || room.mode === 'architect') {
     for (const otherId of room.order) {
       if (otherId === playerId) continue;
       const other = room.players[otherId];
@@ -219,8 +358,21 @@ function lockPiece(room, playerId) {
       resolveBoardOverlap(room, otherId);
     }
   }
+
   p.holdUsed = false;
-  p.piece = spawnPiece(room, playerId);
+
+  if (room.mode === 'relay') {
+    p.piece = null;
+    const currIdx = room.order.indexOf(playerId);
+    const nextId = room.order[(currIdx + 1) % room.order.length];
+    room.activeController = nextId;
+    room.players[nextId].piece = spawnPiece(room, nextId);
+  } else if (room.mode === 'duo') {
+    const slot0Id = room.order[0];
+    room.players[slot0Id].piece = spawnPiece(room, slot0Id);
+  } else {
+    p.piece = spawnPiece(room, playerId);
+  }
 }
 
 function tickSpeedMs(room) {
@@ -282,12 +434,38 @@ function tick(room) {
   broadcast(room);
 }
 
+function raiseGarbage(room) {
+  if (!room.running || room.mode !== 'garbage') {
+    if (room.garbageInterval) { clearInterval(room.garbageInterval); room.garbageInterval = null; }
+    return;
+  }
+  if (room.board[0].some(v => v)) {
+    room.gameOver = true;
+    room.running = false;
+    clearRoomTimers(room);
+    broadcast(room);
+    return;
+  }
+  room.board.shift();
+  const hole = Math.floor(Math.random() * COLS);
+  const newRow = Array(COLS).fill(GARBAGE_COLOR);
+  newRow[hole] = 0;
+  room.board.push(newRow);
+  for (const id of room.order) {
+    const p = room.players[id];
+    if (p?.piece) resolveBoardOverlap(room, id);
+  }
+  room.nextGarbageAt = Date.now() + GARBAGE_INTERVAL_MS;
+  broadcast(room);
+}
+
 function broadcast(room) {
   const payload = {
     type: 'state',
     code: room.code,
     mode: room.mode,
-    board: room.mode === 'shared' ? room.board : null,
+    board: room.mode === 'shared' || room.mode === 'garbage' || room.mode === 'relay' || room.mode === 'duo' || room.mode === 'architect'
+      ? room.board : null,
     players: room.order.map((id, i) => {
       const pl = room.players[id];
       return {
@@ -313,6 +491,12 @@ function broadcast(room) {
     playerCount: room.order.length,
     clearAnim: room.clearAnim,
     tickMs: tickSpeedMs(room),
+    nextGarbageAt: room.mode === 'garbage' ? room.nextGarbageAt : null,
+    activeSlot: room.mode === 'relay'
+      ? room.order.indexOf(room.activeController)
+      : null,
+    silhouette: room.mode === 'architect' && room.silhouette ? room.silhouette.cells : null,
+    silhouetteProgress: room.mode === 'architect' ? silhouetteProgress(room) : null,
   };
   const msg = JSON.stringify(payload);
   for (const playerId of room.order) {
@@ -322,6 +506,7 @@ function broadcast(room) {
 }
 
 function startGame(room) {
+  clearRoomTimers(room);
   room.running = true;
   room.gameOver = false;
   room.score = 0;
@@ -329,6 +514,17 @@ function startGame(room) {
   room.level = 1;
   room.clearAnim = 0;
   room.board = emptyBoard();
+  room.activeController = null;
+  room.silhouette = null;
+  room.nextGarbageAt = 0;
+
+  if (room.mode === 'relay') {
+    room.activeController = room.order[0];
+  }
+  if (room.mode === 'architect') {
+    room.silhouette = pickSilhouette();
+  }
+
   for (const id of room.order) {
     const p = room.players[id];
     p.bag = shuffle(TYPES);
@@ -341,16 +537,34 @@ function startGame(room) {
     p.lines = 0;
     p.level = 1;
     p.gameOver = false;
+    p.piece = null;
     ensureQueue(room, id);
-    p.piece = spawnPiece(room, id);
   }
+
+  if (room.mode === 'relay') {
+    const activeId = room.activeController;
+    room.players[activeId].piece = spawnPiece(room, activeId);
+  } else if (room.mode === 'duo') {
+    const slot0Id = room.order[0];
+    room.players[slot0Id].piece = spawnPiece(room, slot0Id);
+  } else {
+    for (const id of room.order) {
+      room.players[id].piece = spawnPiece(room, id);
+    }
+  }
+
   restartTick(room);
+
+  if (room.mode === 'garbage') {
+    room.nextGarbageAt = Date.now() + GARBAGE_INTERVAL_MS;
+    room.garbageInterval = setInterval(() => raiseGarbage(room), GARBAGE_INTERVAL_MS);
+  }
+
   broadcast(room);
 }
 
 function stopGame(room) {
-  if (room.tickInterval) clearInterval(room.tickInterval);
-  room.tickInterval = null;
+  clearRoomTimers(room);
   room.running = false;
 }
 
@@ -380,12 +594,13 @@ function removePlayerFromRoom(room, playerId) {
       p.lines = 0;
       p.level = 1;
       p.gameOver = false;
+      p.piece = null;
     }
   }
 }
 
 function setRoomMode(room, mode) {
-  if (mode !== 'shared' && mode !== 'split') return;
+  if (!VALID_MODES.includes(mode)) return;
   if (room.mode === mode) return;
   room.mode = mode;
   if (room.order.length === 2) {
@@ -394,6 +609,8 @@ function setRoomMode(room, mode) {
     stopGame(room);
     room.gameOver = false;
     room.board = emptyBoard();
+    room.silhouette = null;
+    room.activeController = null;
     for (const id of room.order) {
       const p = room.players[id];
       p.board = emptyBoard();
@@ -473,8 +690,7 @@ wss.on('connection', (ws) => {
     }
 
     if (msg.type === 'setMode') {
-      const newMode = msg.mode === 'split' ? 'split' : 'shared';
-      setRoomMode(currentRoom, newMode);
+      setRoomMode(currentRoom, msg.mode);
       return;
     }
 
@@ -484,18 +700,29 @@ wss.on('connection', (ws) => {
     }
 
     if (!currentRoom.running) return;
-    const p = currentRoom.players[playerId];
-    if (!p) return;
 
+    let effectiveId = playerId;
+
+    if (currentRoom.mode === 'relay') {
+      if (playerId !== currentRoom.activeController) return;
+    } else if (currentRoom.mode === 'duo' && GAME_ACTIONS.has(msg.type)) {
+      const senderSlot = currentRoom.order.indexOf(playerId);
+      const allowed = senderSlot === 0 ? DUO_P1_ACTIONS : DUO_P2_ACTIONS;
+      if (!allowed.has(msg.type)) return;
+      effectiveId = currentRoom.order[0];
+    }
+
+    const p = currentRoom.players[effectiveId];
+    if (!p) return;
     recordSeq(p, msg);
 
     switch (msg.type) {
-      case 'left':   tryPlayerMove(currentRoom, playerId, -1, 0); break;
-      case 'right':  tryPlayerMove(currentRoom, playerId,  1, 0); break;
-      case 'down':   tryPlayerMove(currentRoom, playerId,  0, 1); break;
-      case 'rotate': tryPlayerRotate(currentRoom, playerId); break;
-      case 'drop':   hardDrop(currentRoom, playerId); break;
-      case 'hold':   doHold(currentRoom, playerId); break;
+      case 'left':   tryPlayerMove(currentRoom, effectiveId, -1, 0); break;
+      case 'right':  tryPlayerMove(currentRoom, effectiveId,  1, 0); break;
+      case 'down':   tryPlayerMove(currentRoom, effectiveId,  0, 1); break;
+      case 'rotate': tryPlayerRotate(currentRoom, effectiveId); break;
+      case 'drop':   hardDrop(currentRoom, effectiveId); break;
+      case 'hold':   doHold(currentRoom, effectiveId); break;
       default: return;
     }
     broadcast(currentRoom);

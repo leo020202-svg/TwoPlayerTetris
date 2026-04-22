@@ -17,6 +17,7 @@ const ctx2 = canvas2.getContext('2d');
 const LOCKED_COLORS = [
   '#05080f',
   '#4ccfff', '#ffd93d', '#c77dff', '#7ae582', '#ff5c7a', '#5c7aff', '#ff9f43',
+  '#6b7280',
 ];
 
 const PLAYER_COLORS = ['#4ccfff', '#ff4d6d'];
@@ -29,6 +30,15 @@ const SHAPES_PREVIEW = {
   Z: [[1,1,0],[0,1,1]],
   J: [[1,0,0],[1,1,1]],
   L: [[0,0,1],[1,1,1]],
+};
+
+const MODE_BLURBS = {
+  shared: 'Shared field: one board, pieces pass through each other mid-flight.',
+  split: 'Split (1v1): each player has their own 10×20 board side by side.',
+  garbage: 'Garbage Survival: every 10 seconds, a new garbage row rises from the bottom. Keep the stack down.',
+  relay: 'Relay: one piece at a time. Control alternates after every lock.',
+  duo: 'Duo Controls: one shared piece. P1 moves and hard-drops, P2 rotates and holds.',
+  architect: 'Architect: fill the dashed target silhouette together. No win/lose — just collaborate.',
 };
 
 let myId = null;
@@ -51,6 +61,14 @@ const copyBtn = document.getElementById('copyCode');
 const newRoomBtn = document.getElementById('newRoomBtn');
 const modeSharedBtn = document.getElementById('modeShared');
 const modeSplitBtn = document.getElementById('modeSplit');
+const modeGarbageBtn = document.getElementById('modeGarbage');
+const modeRelayBtn = document.getElementById('modeRelay');
+const modeDuoBtn = document.getElementById('modeDuo');
+const modeArchitectBtn = document.getElementById('modeArchitect');
+const modeBannerEl = document.getElementById('modeBanner');
+const controlsDefaultEl = document.getElementById('controlsDefault');
+const controlsDuoEl = document.getElementById('controlsDuo');
+const modeBlurbEl = document.getElementById('modeBlurb');
 const gameAreaEl = document.querySelector('.gameArea');
 
 document.getElementById('highScore').textContent = highScore;
@@ -98,6 +116,10 @@ ws.addEventListener('message', (e) => {
 });
 
 function applyModeLayout(mode) {
+  const modes = ['shared', 'split', 'garbage', 'relay', 'duo', 'architect'];
+  for (const m of modes) gameAreaEl.classList.remove(`mode-${m}`);
+  gameAreaEl.classList.add(`mode-${mode}`);
+
   if (mode === 'split') {
     gameAreaEl.classList.add('split');
     canvas2.hidden = false;
@@ -108,8 +130,20 @@ function applyModeLayout(mode) {
     canvas2.hidden = true;
     setCanvasSize(canvas1, BLOCK_SHARED);
   }
-  modeSharedBtn.classList.toggle('active', mode !== 'split');
-  modeSplitBtn.classList.toggle('active', mode === 'split');
+
+  [modeSharedBtn, modeSplitBtn, modeGarbageBtn, modeRelayBtn, modeDuoBtn, modeArchitectBtn]
+    .forEach(b => b && b.classList.remove('active'));
+  const activeBtn = {
+    shared: modeSharedBtn, split: modeSplitBtn,
+    garbage: modeGarbageBtn, relay: modeRelayBtn,
+    duo: modeDuoBtn, architect: modeArchitectBtn,
+  }[mode];
+  if (activeBtn) activeBtn.classList.add('active');
+
+  controlsDefaultEl.hidden = mode === 'duo';
+  controlsDuoEl.hidden = mode !== 'duo';
+
+  modeBlurbEl.textContent = MODE_BLURBS[mode] || '';
 }
 
 function setCanvasSize(c, block) {
@@ -130,13 +164,29 @@ function myBoard() {
 }
 
 function reconcileMyPiece() {
+  if (state?.mode === 'duo') {
+    const slot0 = state.players.find(p => p.slot === 0);
+    const srv = slot0?.piece;
+    myPredicted = srv ? { ...srv } : null;
+    return;
+  }
+  if (state?.mode === 'relay') {
+    if (state.activeSlot !== mySlot) { myPredicted = null; return; }
+    const me = state.players.find(p => p.id === myId);
+    const srv = me?.piece;
+    if (!srv) { myPredicted = null; return; }
+    if (!myPredicted || myPredicted.type !== srv.type || (me.lastSeq || 0) >= lastSentSeq) {
+      myPredicted = { ...srv };
+    }
+    return;
+  }
   const me = state.players.find(p => p.id === myId);
   if (!me?.piece) { myPredicted = null; return; }
-  const server = me.piece;
+  const srv = me.piece;
   if (!myPredicted
-      || myPredicted.type !== server.type
+      || myPredicted.type !== srv.type
       || (me.lastSeq || 0) >= lastSentSeq) {
-    myPredicted = { type: server.type, rot: server.rot, x: server.x, y: server.y };
+    myPredicted = { type: srv.type, rot: srv.rot, x: srv.x, y: srv.y };
   }
 }
 
@@ -179,6 +229,10 @@ newRoomBtn.addEventListener('click', () => {
 
 modeSharedBtn.addEventListener('click', () => send({ type: 'setMode', mode: 'shared' }));
 modeSplitBtn.addEventListener('click', () => send({ type: 'setMode', mode: 'split' }));
+modeGarbageBtn.addEventListener('click', () => send({ type: 'setMode', mode: 'garbage' }));
+modeRelayBtn.addEventListener('click', () => send({ type: 'setMode', mode: 'relay' }));
+modeDuoBtn.addEventListener('click', () => send({ type: 'setMode', mode: 'duo' }));
+modeArchitectBtn.addEventListener('click', () => send({ type: 'setMode', mode: 'architect' }));
 
 joinInput.addEventListener('input', () => {
   joinInput.value = joinInput.value.toUpperCase().replace(/[^A-Z2-9]/g, '').slice(0, 4);
@@ -190,30 +244,44 @@ const SOFT_DROP_REPEAT = 35;
 const keyTimers = {};
 
 function canControl() {
-  return mySlot >= 0 && state?.running && myPredicted && myBoard();
+  if (mySlot < 0 || !state?.running) return false;
+  if (state.mode === 'relay' && state.activeSlot !== mySlot) return false;
+  if (!myBoard()) return false;
+  return true;
+}
+
+function isDuoActionAllowed(action) {
+  if (state?.mode !== 'duo') return true;
+  const allowedP1 = new Set(['left', 'right', 'down', 'drop']);
+  const allowedP2 = new Set(['rotate', 'hold', 'down']);
+  return mySlot === 0 ? allowedP1.has(action) : allowedP2.has(action);
 }
 
 function attemptLocalMove(dx, dy) {
-  if (!canControl()) return false;
+  if (!canControl() || !myPredicted) return false;
+  if (state.mode === 'duo') return false;
   const next = sharedTryMove(myBoard(), myPredicted, dx, dy);
   if (next) { myPredicted = next; return true; }
   return false;
 }
 
 function attemptLocalRotate() {
-  if (!canControl()) return false;
+  if (!canControl() || !myPredicted) return false;
+  if (state.mode === 'duo') return false;
   const next = sharedTryRotate(myBoard(), myPredicted);
   if (next) { myPredicted = next; return true; }
   return false;
 }
 
 function attemptLocalHardDrop() {
-  if (!canControl()) return false;
+  if (!canControl() || !myPredicted) return false;
+  if (state.mode === 'duo') return false;
   myPredicted = hardDropPos(myBoard(), myPredicted);
   return true;
 }
 
 function doMove(action) {
+  if (!isDuoActionAllowed(action)) return;
   let moved = false;
   if (action === 'left') moved = attemptLocalMove(-1, 0);
   else if (action === 'right') moved = attemptLocalMove(1, 0);
@@ -285,11 +353,19 @@ function renderBoardOnCanvas(canvas, ctx, board, pieces, block, isMySideIdx) {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   if (!board) return;
 
+  if (state.mode === 'architect' && state.silhouette) {
+    for (const [x, y] of state.silhouette) {
+      if (y < 0 || y >= ROWS || x < 0 || x >= COLS) continue;
+      const filled = board[y][x];
+      drawSilhouetteCell(ctx, x, y, block, filled);
+    }
+  }
+
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const v = board[r][c];
-      if (v) drawBlock(ctx, c * block, r * block, block, LOCKED_COLORS[v], 'rgba(0,0,0,0.35)');
-      else drawGridCell(ctx, c, r, block);
+      if (v) drawBlock(ctx, c * block, r * block, block, LOCKED_COLORS[v] || '#888', 'rgba(0,0,0,0.35)');
+      else if (state.mode !== 'architect' || !isSilhouetteCell(c, r)) drawGridCell(ctx, c, r, block);
     }
   }
 
@@ -330,8 +406,26 @@ function renderBoardOnCanvas(canvas, ctx, board, pieces, block, isMySideIdx) {
   }
 }
 
+function isSilhouetteCell(x, y) {
+  if (!state?.silhouette) return false;
+  return state.silhouette.some(([sx, sy]) => sx === x && sy === y);
+}
+
+function drawSilhouetteCell(g, x, y, block, satisfied) {
+  const px = x * block, py = y * block;
+  g.fillStyle = satisfied ? 'rgba(255,217,61,0.10)' : 'rgba(255,255,255,0.04)';
+  g.fillRect(px, py, block, block);
+  g.strokeStyle = satisfied ? 'rgba(255,217,61,0.7)' : 'rgba(255,255,255,0.22)';
+  g.lineWidth = 1;
+  g.setLineDash([3, 2]);
+  g.strokeRect(px + 1.5, py + 1.5, block - 3, block - 3);
+  g.setLineDash([]);
+}
+
 function render() {
   if (!state) return;
+
+  updateModeBanner();
 
   if (state.mode === 'split') {
     const boards = [state.players[0]?.board, state.players[1]?.board];
@@ -345,9 +439,15 @@ function render() {
     }
   } else {
     const board = state.board;
-    const pieces = state.players.map(p => ({
-      piece: p.piece, slot: p.slot, isMe: p.id === myId,
-    }));
+    let pieces;
+    if (state.mode === 'duo' || state.mode === 'relay') {
+      const active = state.players.find(p => p.piece);
+      pieces = active ? [{ piece: active.piece, slot: active.slot, isMe: active.id === myId }] : [];
+    } else {
+      pieces = state.players.map(p => ({
+        piece: p.piece, slot: p.slot, isMe: p.id === myId,
+      }));
+    }
     renderBoardOnCanvas(canvas1, ctx1, board, pieces, BLOCK_SHARED, mySlot);
   }
 
@@ -358,6 +458,53 @@ function render() {
     for (let i = 0; i < 3; i++) {
       drawPreview(`${prefix}Next${i}`, pl?.next?.[i], PLAYER_COLORS[slot]);
     }
+  }
+}
+
+let bannerTickHandle = null;
+function updateModeBanner() {
+  if (!state) { modeBannerEl.hidden = true; return; }
+  let text = '';
+  let kind = '';
+  if (state.mode === 'garbage' && state.running && state.nextGarbageAt) {
+    const ms = Math.max(0, state.nextGarbageAt - Date.now());
+    const s = Math.ceil(ms / 1000);
+    text = `NEXT GARBAGE IN ${s}s`;
+    kind = 'garbage';
+  } else if (state.mode === 'relay' && state.running && typeof state.activeSlot === 'number') {
+    if (state.activeSlot === mySlot) {
+      text = 'YOUR TURN';
+      kind = mySlot === 0 ? 'relay-p1' : 'relay-p2';
+    } else {
+      text = `PLAYER ${state.activeSlot + 1}'S TURN`;
+      kind = 'relay-wait';
+    }
+  } else if (state.mode === 'architect' && state.silhouetteProgress) {
+    const { filled, total } = state.silhouetteProgress;
+    text = `ARCHITECT: ${filled} / ${total} cells`;
+    kind = 'architect';
+  } else if (state.mode === 'duo' && state.running) {
+    text = mySlot === 0
+      ? 'YOU: MOVE + HARD DROP  (P2: rotate + hold)'
+      : mySlot === 1
+      ? 'YOU: ROTATE + HOLD  (P1: move + hard drop)'
+      : 'Duo Controls';
+    kind = 'duo';
+  }
+  modeBannerEl.textContent = text;
+  modeBannerEl.className = 'mode-banner' + (kind ? ` ${kind}` : '');
+  modeBannerEl.hidden = !text;
+
+  if (state.mode === 'garbage' && state.running) {
+    if (!bannerTickHandle) {
+      bannerTickHandle = setInterval(() => {
+        if (state?.mode === 'garbage' && state?.running) updateModeBanner();
+        else { clearInterval(bannerTickHandle); bannerTickHandle = null; }
+      }, 250);
+    }
+  } else if (bannerTickHandle) {
+    clearInterval(bannerTickHandle);
+    bannerTickHandle = null;
   }
 }
 
@@ -420,9 +567,9 @@ function overlayOn(g, c, title, subtitle) {
   g.fillRect(0, 0, c.width, c.height);
   g.fillStyle = '#fff';
   g.textAlign = 'center';
-  g.font = 'bold 18px ui-sans-serif, system-ui, sans-serif';
-  g.fillText(title, c.width / 2, c.height / 2 - 6);
-  g.font = '12px ui-sans-serif, system-ui, sans-serif';
+  g.font = 'bold 22px ui-sans-serif, system-ui, sans-serif';
+  g.fillText(title, c.width / 2, c.height / 2 - 8);
+  g.font = '14px ui-sans-serif, system-ui, sans-serif';
   g.fillStyle = '#cfd4e6';
   g.fillText(subtitle, c.width / 2, c.height / 2 + 16);
 }
@@ -438,8 +585,6 @@ function updateHUD() {
   const parts = [];
   if (mySlot === 0) parts.push('You are Player 1 (cyan).');
   else if (mySlot === 1) parts.push('You are Player 2 (pink).');
-  if (state?.mode === 'split') parts.push('Split mode: each player has their own board.');
-  else parts.push('Shared mode: same board, pieces pass through.');
   if (state?.playerCount === 1) parts.push(`Share code ${myCode} to start.`);
   else if (state?.playerCount === 2 && state?.running) parts.push('Playing.');
   else if (state?.gameOver) parts.push('Game over — press R or Enter to restart.');
