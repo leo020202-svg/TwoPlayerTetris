@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Co-op Tetris</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="page">
+    <div class="room-bar">
+      <div class="room-code-group">
+        <span class="room-label">YOUR CODE</span>
+        <span class="room-code" id="roomCode">----</span>
+        <button type="button" id="copyCode" class="btn ghost">COPY</button>
+      </div>
+      <form class="room-join" id="joinForm" autocomplete="off">
+        <input
+          id="joinInput"
+          maxlength="4"
+          placeholder="ENTER CODE"
+          inputmode="latin"
+          spellcheck="false"
+          autocapitalize="characters" />
+        <button type="submit" class="btn primary">JOIN</button>
+      </form>
+      <button type="button" id="newRoomBtn" class="btn ghost">NEW ROOM</button>
+      <div class="room-msg" id="roomMsg"></div>
+    </div>
+
+    <div class="topstats">
+      <div class="stat-box">
+        <h3>TEAM SCORE</h3>
+        <div class="value" id="teamScore">0</div>
+      </div>
+      <div class="stat-box">
+        <h3>LEVEL</h3>
+        <div class="value" id="level">1</div>
+      </div>
+      <div class="stat-box">
+        <h3>LINES</h3>
+        <div class="value" id="lines">0</div>
+      </div>
+      <div class="stat-box highlight">
+        <h3>HIGH SCORE</h3>
+        <div class="value" id="highScore">0</div>
+      </div>
+    </div>
+
+    <div class="gameArea">
+      <aside class="player-panel p1" id="p1Panel">
+        <div class="player-header">
+          <h2>Player 1</h2>
+          <span class="score" id="p1Score">0</span>
+          <span class="you-badge" id="p1You" hidden>YOU</span>
+        </div>
+        <div class="section">
+          <h4>HOLD</h4>
+          <canvas class="mini" id="p1Hold" width="112" height="80"></canvas>
+        </div>
+        <div class="section">
+          <h4>NEXT</h4>
+          <div class="next-queue">
+            <canvas class="mini" id="p1Next0" width="112" height="80"></canvas>
+            <canvas class="mini" id="p1Next1" width="112" height="80"></canvas>
+            <canvas class="mini" id="p1Next2" width="112" height="80"></canvas>
+          </div>
+        </div>
+      </aside>
+
+      <canvas id="board" width="300" height="600"></canvas>
+
+      <aside class="player-panel p2" id="p2Panel">
+        <div class="player-header">
+          <h2>Player 2</h2>
+          <span class="score" id="p2Score">0</span>
+          <span class="you-badge" id="p2You" hidden>YOU</span>
+        </div>
+        <div class="section">
+          <h4>HOLD</h4>
+          <canvas class="mini" id="p2Hold" width="112" height="80"></canvas>
+        </div>
+        <div class="section">
+          <h4>NEXT</h4>
+          <div class="next-queue">
+            <canvas class="mini" id="p2Next0" width="112" height="80"></canvas>
+            <canvas class="mini" id="p2Next1" width="112" height="80"></canvas>
+            <canvas class="mini" id="p2Next2" width="112" height="80"></canvas>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <div class="bottom">
+      <div class="panel">
+        <h3>Controls</h3>
+        <div class="ctrl-row"><kbd>&larr;</kbd><kbd>&rarr;</kbd> move <kbd>&uarr;</kbd> rotate <kbd>&darr;</kbd> soft drop</div>
+        <div class="ctrl-row"><kbd>Space</kbd> hard drop <kbd>C</kbd> or <kbd>Shift</kbd> hold</div>
+        <div class="ctrl-row muted">WASD also works. After a game over, press <kbd>R</kbd> or <kbd>Enter</kbd> to restart.</div>
+      </div>
+      <div class="panel">
+        <h3>How to play together</h3>
+        <p id="statusLine">Connecting...</p>
+        <p class="muted">Share your code with a friend. They enter it on their screen and you both play on the same board. Clear 10 lines to level up.</p>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/client.js"></script>
+</body>
+</html>

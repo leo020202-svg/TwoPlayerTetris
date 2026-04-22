@@ -1,0 +1,15 @@
+{
+  "name": "coop-tetris",
+  "version": "1.0.0",
+  "description": "Two-player co-op Tetris on a shared field, over the internet",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
