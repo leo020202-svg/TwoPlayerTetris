@@ -483,6 +483,10 @@ function render() {
     overlayOn(ctx, c, `Share code: ${myCode}`, 'Waiting for player 2…');
   }
 
+  if (state.mode === 'architect' && state.running && state.silhouette) {
+    scheduleRender();
+  }
+
   for (let slot = 0; slot < 2; slot++) {
     const pl = state.players[slot];
     const prefix = `p${slot + 1}`;
@@ -522,13 +526,32 @@ function isSilhouetteCell(x, y) {
 
 function drawSilhouetteCell(g, x, y, block, satisfied) {
   const px = x * block, py = y * block;
-  g.fillStyle = satisfied ? 'rgba(255,217,61,0.10)' : 'rgba(255,255,255,0.04)';
-  g.fillRect(px, py, block, block);
-  g.strokeStyle = satisfied ? 'rgba(255,217,61,0.7)' : 'rgba(255,255,255,0.22)';
-  g.lineWidth = 1;
-  g.setLineDash([3, 2]);
-  g.strokeRect(px + 1.5, py + 1.5, block - 3, block - 3);
+  const baseColor = satisfied ? '#ffd93d' : '#7fdaff';
+  const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 380);
+
+  g.save();
+  g.shadowColor = baseColor;
+  g.shadowBlur = satisfied ? 18 : 14;
+
+  g.fillStyle = satisfied
+    ? `rgba(255,217,61,${0.22 + 0.18 * pulse})`
+    : `rgba(127,218,255,${0.16 + 0.18 * pulse})`;
+  g.fillRect(px + 2, py + 2, block - 4, block - 4);
+
+  g.shadowBlur = satisfied ? 12 : 10;
+  g.strokeStyle = baseColor;
+  g.globalAlpha = 0.85;
+  g.lineWidth = 2;
+  g.setLineDash(satisfied ? [] : [4, 3]);
+  g.strokeRect(px + 2.5, py + 2.5, block - 5, block - 5);
   g.setLineDash([]);
+
+  g.shadowBlur = 0;
+  g.globalAlpha = 1;
+  g.fillStyle = `rgba(255,255,255,${0.10 + 0.10 * pulse})`;
+  g.fillRect(px + 4, py + 4, block - 8, 2);
+
+  g.restore();
 }
 
 let bannerTickHandle = null;
