@@ -47,6 +47,8 @@ let myCode = '----';
 let state = null;
 let lastClearAnim = 0;
 let flashUntil = 0;
+let lastArchitectWinAt = 0;
+let architectCelebrateUntil = 0;
 let highScore = Number(localStorage.getItem('tetrisHighScore') || 0);
 
 let myPredicted = null;
@@ -105,6 +107,10 @@ ws.addEventListener('message', (e) => {
     if (state.clearAnim && state.clearAnim !== lastClearAnim) {
       lastClearAnim = state.clearAnim;
       flashUntil = performance.now() + 220;
+    }
+    if (state.architectWinAt && state.architectWinAt !== lastArchitectWinAt) {
+      lastArchitectWinAt = state.architectWinAt;
+      architectCelebrateUntil = performance.now() + 1800;
     }
     if (state.score > highScore) {
       highScore = state.score;
@@ -467,6 +473,11 @@ function render() {
     scheduleRender();
   }
 
+  if (performance.now() < architectCelebrateUntil) {
+    drawArchitectCelebration(ctx, c, state.architectLevel);
+    scheduleRender();
+  }
+
   if (state.gameOver) overlayOn(ctx, c, 'GAME OVER', 'Press R or Enter to restart');
   else if (!state.running && state.playerCount < 2) {
     overlayOn(ctx, c, `Share code: ${myCode}`, 'Waiting for player 2…');
@@ -539,8 +550,9 @@ function updateModeBanner() {
       kind = 'relay-wait';
     }
   } else if (state.mode === 'architect' && state.silhouetteProgress) {
-    const { filled, total } = state.silhouetteProgress;
-    text = `ARCHITECT: ${filled} / ${total} cells`;
+    const { filled, total, name } = state.silhouetteProgress;
+    const lvl = state.architectLevel || 1;
+    text = `LEVEL ${lvl} — ${name?.toUpperCase() ?? ''} — ${filled} / ${total}`;
     kind = 'architect';
   } else if (state.mode === 'duo' && state.running) {
     text = mySlot === 0
@@ -622,6 +634,37 @@ function drawPreview(canvasId, type, accent) {
       drawBlock(g, ox + col * cell, oy + r * cell, cell, fill, 'rgba(0,0,0,0.35)');
     }
   }
+}
+
+function drawArchitectCelebration(g, c, level) {
+  const remaining = architectCelebrateUntil - performance.now();
+  const total = 1800;
+  const t = 1 - remaining / total;
+  const alpha = remaining > total - 250
+    ? (total - remaining) / 250
+    : remaining < 400 ? remaining / 400 : 1;
+
+  g.save();
+  g.globalAlpha = alpha;
+  g.fillStyle = 'rgba(255,217,61,0.18)';
+  g.fillRect(0, 0, c.width, c.height);
+
+  g.textAlign = 'center';
+  g.fillStyle = '#ffd93d';
+  g.font = 'bold 38px ui-sans-serif, system-ui, sans-serif';
+  g.fillText(`LEVEL ${(level || 1) - 1} COMPLETE!`, c.width / 2, c.height / 2 - 12);
+  g.fillStyle = '#ffffff';
+  g.font = 'bold 18px ui-sans-serif, system-ui, sans-serif';
+  g.fillText(`Now: Level ${level || 1}`, c.width / 2, c.height / 2 + 22);
+
+  for (let i = 0; i < 24; i++) {
+    const seed = (i * 9301 + 49297) % 233280;
+    const cx = (seed / 233280) * c.width;
+    const cy = ((t * 1.3 + i * 0.15) % 1) * c.height;
+    g.fillStyle = ['#ffd93d', '#4ccfff', '#ff4d6d', '#7ae582', '#c77dff'][i % 5];
+    g.fillRect(cx, cy, 6, 6);
+  }
+  g.restore();
 }
 
 function overlayOn(g, c, title, subtitle) {

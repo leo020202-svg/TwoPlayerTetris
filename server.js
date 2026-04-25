@@ -52,36 +52,78 @@ const GARBAGE_INTERVAL_MS = 10000;
 const GARBAGE_COLOR = 8;
 const SPLIT_DIVIDER_COL = 5;
 
-const SILHOUETTES = {
-  heart: [
+const ARCHITECT_LEVELS = [
+  { name: 'tiny block', pattern: [
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '....##....', '....##....', '..........',
+  ]},
+  { name: 'small T', pattern: [
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '...###....', '....#.....', '....#.....', '..........',
+  ]},
+  { name: 'plus', pattern: [
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '....#.....',
+    '...###....', '....#.....', '..........', '..........',
+  ]},
+  { name: 'small house', pattern: [
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '....#.....', '...###....', '..#####...',
+    '..#...#...', '..#####...', '..........', '..........',
+  ]},
+  { name: 'diamond', pattern: [
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '....#.....', '...###....', '..#####...',
+    '...###....', '....#.....', '..........', '..........',
+  ]},
+  { name: 'small heart', pattern: [
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '..#.#.....', '.#####....', '.#####....', '..###.....',
+    '...#......', '..........', '..........', '..........',
+  ]},
+  { name: 'arrow', pattern: [
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '....##....', '...####...',
+    '..######..', '.########.', '....##....', '....##....',
+    '....##....', '....##....', '....##....', '..........',
+  ]},
+  { name: 'letter A', pattern: [
+    '..........', '..........', '..........', '..........',
+    '..........', '..........', '..........', '..........',
+    '..........', '....##....', '...####...', '..##..##..',
+    '..##..##..', '..######..', '..######..', '..##..##..',
+    '..##..##..', '..##..##..', '..........', '..........',
+  ]},
+  { name: 'heart', pattern: [
     '..........', '..........', '..........', '..........',
     '..........', '..........', '..........', '..........',
     '..##.##...', '.#######..', '.#######..', '.#######..',
     '..#####...', '...###....', '....#.....', '..........',
     '..........', '..........', '..........', '..........',
-  ],
-  smiley: [
+  ]},
+  { name: 'smiley', pattern: [
     '..........', '..........', '..........', '..........',
     '..........', '..........', '..........', '..########',
     '.#........', '#.........', '#..#...#..', '#.........',
     '#.#.....#.', '#..#####..', '.#........', '..########',
     '..........', '..........', '..........', '..........',
-  ],
-  letterA: [
-    '..........', '..........', '..........', '..........',
-    '..........', '..........', '..........', '....##....',
-    '...####...', '..##..##..', '..##..##..', '..######..',
-    '..######..', '..##..##..', '..##..##..', '..##..##..',
-    '..........', '..........', '..........', '..........',
-  ],
-  arrow: [
-    '..........', '..........', '..........', '..........',
-    '....##....', '...####...', '..######..', '.########.',
-    '....##....', '....##....', '....##....', '....##....',
-    '....##....', '....##....', '....##....', '....##....',
-    '..........', '..........', '..........', '..........',
-  ],
-};
+  ]},
+];
 
 function silhouetteCells(pattern) {
   const cells = [];
@@ -94,10 +136,10 @@ function silhouetteCells(pattern) {
   return cells;
 }
 
-function pickSilhouette() {
-  const keys = Object.keys(SILHOUETTES);
-  const key = keys[Math.floor(Math.random() * keys.length)];
-  return { name: key, cells: silhouetteCells(SILHOUETTES[key]) };
+function pickSilhouette(level) {
+  const idx = (Math.max(1, level || 1) - 1) % ARCHITECT_LEVELS.length;
+  const lvl = ARCHITECT_LEVELS[idx];
+  return { name: lvl.name, cells: silhouetteCells(lvl.pattern) };
 }
 
 function silhouetteProgress(room) {
@@ -147,6 +189,8 @@ function createRoom() {
     nextGarbageAt: 0,
     activeController: null,
     silhouette: null,
+    architectLevel: 1,
+    architectWinAt: 0,
   };
   rooms.set(code, room);
   return room;
@@ -309,6 +353,27 @@ function lockPiece(room, playerId) {
 
   p.holdUsed = false;
 
+  if (room.mode === 'architect' && room.silhouette) {
+    const allFilled = room.silhouette.cells.every(([x, y]) =>
+      y >= 0 && y < ROWS && x >= 0 && x < COLS && room.board[y][x]
+    );
+    if (allFilled) {
+      const bonus = 500 * room.architectLevel;
+      room.score += bonus;
+      p.score += bonus;
+      room.architectLevel += 1;
+      room.silhouette = pickSilhouette(room.architectLevel);
+      room.board = emptyBoard();
+      room.architectWinAt = Date.now();
+      for (const id of room.order) {
+        const pl = room.players[id];
+        pl.holdUsed = false;
+        pl.piece = spawnPiece(room, id);
+      }
+      return;
+    }
+  }
+
   if (room.mode === 'relay') {
     p.piece = null;
     const currIdx = room.order.indexOf(playerId);
@@ -455,6 +520,8 @@ function broadcast(room) {
       : null,
     silhouette: room.mode === 'architect' && room.silhouette ? room.silhouette.cells : null,
     silhouetteProgress: room.mode === 'architect' ? silhouetteProgress(room) : null,
+    architectLevel: room.mode === 'architect' ? room.architectLevel : null,
+    architectWinAt: room.mode === 'architect' ? room.architectWinAt : null,
   };
   const msg = JSON.stringify(payload);
   for (const playerId of room.order) {
@@ -480,7 +547,9 @@ function startGame(room) {
     room.activeController = room.order[0];
   }
   if (room.mode === 'architect') {
-    room.silhouette = pickSilhouette();
+    room.architectLevel = 1;
+    room.architectWinAt = 0;
+    room.silhouette = pickSilhouette(room.architectLevel);
   }
 
   for (const id of room.order) {
