@@ -57,6 +57,8 @@ let lastSentSeq = 0;
 let lastWasGameOver = false;
 let localGravityInterval = null;
 let localGravityMs = null;
+let pendingDrop = false;
+let pendingDropTimer = null;
 let lastSavedKey = null;
 let playerName = (localStorage.getItem('tetrisPlayerName') || '').slice(0, 20);
 
@@ -221,13 +223,19 @@ function reconcileMyPiece() {
     return;
   }
   const me = state.players.find(p => p.id === myId);
-  if (!me?.piece) { myPredicted = null; return; }
+  if (!me?.piece) { myPredicted = null; clearPendingDrop(); return; }
   const srv = me.piece;
   if (!myPredicted || myPredicted.type !== srv.type) {
     myPredicted = { type: srv.type, rot: srv.rot, x: srv.x, y: srv.y };
+    clearPendingDrop();
   } else if ((me.lastSeq || 0) >= lastSentSeq) {
     myPredicted = { type: srv.type, rot: srv.rot, x: srv.x, y: Math.max(srv.y, myPredicted.y) };
   }
+}
+
+function clearPendingDrop() {
+  pendingDrop = false;
+  if (pendingDropTimer) { clearTimeout(pendingDropTimer); pendingDropTimer = null; }
 }
 
 function setupLocalGravity() {
@@ -247,7 +255,7 @@ function setupLocalGravity() {
 }
 
 function localGravityTick() {
-  if (!state?.running || !myPredicted) return;
+  if (!state?.running || !myPredicted || pendingDrop) return;
   if (state.mode === 'duo') return;
   if (state.mode === 'relay' && state.activeSlot !== mySlot) return;
   const next = localTryMove(myPredicted, 0, 1);
@@ -372,7 +380,7 @@ function localHardDrop(piece) {
 }
 
 function attemptLocalMove(dx, dy) {
-  if (!canControl() || !myPredicted) return false;
+  if (!canControl() || !myPredicted || pendingDrop) return false;
   if (state.mode === 'duo') return false;
   const next = localTryMove(myPredicted, dx, dy);
   if (next) { myPredicted = next; return true; }
@@ -380,7 +388,7 @@ function attemptLocalMove(dx, dy) {
 }
 
 function attemptLocalRotate() {
-  if (!canControl() || !myPredicted) return false;
+  if (!canControl() || !myPredicted || pendingDrop) return false;
   if (state.mode === 'duo') return false;
   const next = localTryRotate(myPredicted);
   if (next) { myPredicted = next; return true; }
@@ -388,9 +396,12 @@ function attemptLocalRotate() {
 }
 
 function attemptLocalHardDrop() {
-  if (!canControl() || !myPredicted) return false;
+  if (!canControl() || !myPredicted || pendingDrop) return false;
   if (state.mode === 'duo') return false;
   myPredicted = localHardDrop(myPredicted);
+  pendingDrop = true;
+  if (pendingDropTimer) clearTimeout(pendingDropTimer);
+  pendingDropTimer = setTimeout(() => { pendingDrop = false; pendingDropTimer = null; }, 1500);
   return true;
 }
 
@@ -472,32 +483,6 @@ function ghostCellsClamped(board, piece, slot) {
   return ghostCells(board, piece);
 }
 
-function stackedGhostsForPieces(board, pieces) {
-  const items = pieces.map((p, idx) => {
-    const eff = p.isMe ? myPredicted : p.piece;
-    return { idx, slot: p.slot, eff };
-  }).filter(it => it.eff);
-
-  // Whichever piece is currently lower on the board lands first; the other
-  // stacks on top of its ghost. Tie break by slot for determinism.
-  items.sort((a, b) => {
-    if (a.eff.y !== b.eff.y) return b.eff.y - a.eff.y;
-    return a.slot - b.slot;
-  });
-
-  const virt = board.map(row => row.slice());
-  const result = new Array(pieces.length).fill(null);
-
-  for (const it of items) {
-    const ghost = ghostCellsClamped(virt, it.eff, it.slot);
-    for (const [x, y] of ghost) {
-      if (y >= 0 && y < ROWS && x >= 0 && x < COLS) virt[y][x] = 1;
-    }
-    result[it.idx] = ghost;
-  }
-  return result;
-}
-
 function render() {
   if (!state) return;
   const board = state.board;
@@ -538,13 +523,11 @@ function render() {
   }
 
   if (board) {
-    const ghostList = stackedGhostsForPieces(board, pieces);
-    for (let i = 0; i < pieces.length; i++) {
-      const p = pieces[i];
-      const ghost = ghostList[i];
-      if (!ghost) continue;
+    for (const p of pieces) {
+      const effective = p.isMe ? myPredicted : p.piece;
+      if (!effective) continue;
       const color = PLAYER_COLORS[p.slot] || '#fff';
-      for (const [x, y] of ghost) {
+      for (const [x, y] of ghostCellsClamped(board, effective, p.slot)) {
         if (y < 0) continue;
         drawGhost(ctx, x, y, color, BLOCK);
       }
