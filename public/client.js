@@ -472,6 +472,32 @@ function ghostCellsClamped(board, piece, slot) {
   return ghostCells(board, piece);
 }
 
+function stackedGhostsForPieces(board, pieces) {
+  const items = pieces.map((p, idx) => {
+    const eff = p.isMe ? myPredicted : p.piece;
+    return { idx, slot: p.slot, eff };
+  }).filter(it => it.eff);
+
+  // Whichever piece is currently lower on the board lands first; the other
+  // stacks on top of its ghost. Tie break by slot for determinism.
+  items.sort((a, b) => {
+    if (a.eff.y !== b.eff.y) return b.eff.y - a.eff.y;
+    return a.slot - b.slot;
+  });
+
+  const virt = board.map(row => row.slice());
+  const result = new Array(pieces.length).fill(null);
+
+  for (const it of items) {
+    const ghost = ghostCellsClamped(virt, it.eff, it.slot);
+    for (const [x, y] of ghost) {
+      if (y >= 0 && y < ROWS && x >= 0 && x < COLS) virt[y][x] = 1;
+    }
+    result[it.idx] = ghost;
+  }
+  return result;
+}
+
 function render() {
   if (!state) return;
   const board = state.board;
@@ -512,11 +538,13 @@ function render() {
   }
 
   if (board) {
-    for (const p of pieces) {
-      const effective = p.isMe ? myPredicted : p.piece;
-      if (!effective) continue;
+    const ghostList = stackedGhostsForPieces(board, pieces);
+    for (let i = 0; i < pieces.length; i++) {
+      const p = pieces[i];
+      const ghost = ghostList[i];
+      if (!ghost) continue;
       const color = PLAYER_COLORS[p.slot] || '#fff';
-      for (const [x, y] of ghostCellsClamped(board, effective, p.slot)) {
+      for (const [x, y] of ghost) {
         if (y < 0) continue;
         drawGhost(ctx, x, y, color, BLOCK);
       }
