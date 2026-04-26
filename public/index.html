@@ -25,6 +25,10 @@
         <button type="submit" class="btn primary">JOIN</button>
       </form>
       <button type="button" id="newRoomBtn" class="btn ghost">NEW ROOM</button>
+      <div class="name-group">
+        <span class="room-label">NAME</span>
+        <input id="nameInput" maxlength="20" placeholder="Anonymous" />
+      </div>
       <div class="room-msg" id="roomMsg"></div>
     </div>
 
@@ -125,6 +129,27 @@
         <p id="statusLine">Connecting...</p>
         <p class="muted" id="modeBlurb"></p>
       </div>
+    </div>
+
+    <div class="leaderboard-panel">
+      <div class="leaderboard-head">
+        <h3>Leaderboard</h3>
+        <span class="leaderboard-sub" id="leaderboardSub">Saved locally on this device</span>
+        <button type="button" id="clearLeaderboard" class="btn ghost">CLEAR</button>
+      </div>
+      <table class="leaderboard">
+        <thead>
+          <tr>
+            <th class="rank">#</th>
+            <th>Name</th>
+            <th class="num">Score</th>
+            <th class="num">Lines</th>
+            <th>Mode</th>
+            <th>When</th>
+          </tr>
+        </thead>
+        <tbody id="leaderboardBody"></tbody>
+      </table>
     </div>
   </div>
   <script type="module" src="/client.js"></script>

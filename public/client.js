@@ -54,6 +54,21 @@ let highScore = Number(localStorage.getItem('tetrisHighScore') || 0);
 let myPredicted = null;
 let inputSeq = 0;
 let lastSentSeq = 0;
+let lastWasGameOver = false;
+let lastSavedKey = null;
+let playerName = (localStorage.getItem('tetrisPlayerName') || '').slice(0, 20);
+
+const LEADERBOARD_KEY = 'tetrisLeaderboard';
+const MAX_LEADERBOARD = 50;
+
+const MODE_LABELS = {
+  shared: 'Shared',
+  split: 'Split',
+  garbage: 'Garbage',
+  relay: 'Relay',
+  duo: 'Duo',
+  architect: 'Architect',
+};
 
 const roomCodeEl = document.getElementById('roomCode');
 const roomMsgEl = document.getElementById('roomMsg');
@@ -72,9 +87,24 @@ const controlsDefaultEl = document.getElementById('controlsDefault');
 const controlsDuoEl = document.getElementById('controlsDuo');
 const modeBlurbEl = document.getElementById('modeBlurb');
 const gameAreaEl = document.querySelector('.gameArea');
+const nameInput = document.getElementById('nameInput');
+const leaderboardBody = document.getElementById('leaderboardBody');
+const clearLeaderboardBtn = document.getElementById('clearLeaderboard');
+
+if (nameInput) nameInput.value = playerName;
+nameInput?.addEventListener('input', () => {
+  playerName = nameInput.value.slice(0, 20);
+  localStorage.setItem('tetrisPlayerName', playerName);
+});
+clearLeaderboardBtn?.addEventListener('click', () => {
+  if (!confirm('Clear all saved leaderboard scores? This cannot be undone.')) return;
+  localStorage.removeItem(LEADERBOARD_KEY);
+  renderLeaderboard();
+});
 
 setCanvasSize(canvas1, BLOCK);
 document.getElementById('highScore').textContent = highScore;
+renderLeaderboard();
 
 const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
 const ws = new WebSocket(`${wsProto}//${location.host}`);
@@ -116,6 +146,13 @@ ws.addEventListener('message', (e) => {
       highScore = state.score;
       localStorage.setItem('tetrisHighScore', String(highScore));
     }
+    if (state.gameOver && !lastWasGameOver) {
+      saveScoreEntry();
+    }
+    if (!state.gameOver && lastWasGameOver) {
+      lastSavedKey = null;
+    }
+    lastWasGameOver = !!state.gameOver;
     reconcileMyPiece();
     scheduleRender();
     updateHUD();
@@ -726,4 +763,76 @@ function setStatus(text) {
 function setRoomMsg(text, kind) {
   roomMsgEl.textContent = text;
   roomMsgEl.className = 'room-msg' + (kind === 'info' ? ' info' : '');
+}
+
+function saveScoreEntry() {
+  if (!state || state.score <= 0) return;
+  const key = `${state.code || 'no-code'}|${state.score}|${state.lines}|${state.mode}`;
+  if (key === lastSavedKey) return;
+  lastSavedKey = key;
+  const name = (playerName || '').trim() || 'Anonymous';
+  const entry = {
+    name: name.slice(0, 20),
+    score: state.score,
+    lines: state.lines || 0,
+    mode: state.mode,
+    ts: Date.now(),
+  };
+  const list = readLeaderboard();
+  list.push(entry);
+  list.sort((a, b) => b.score - a.score);
+  const trimmed = list.slice(0, MAX_LEADERBOARD);
+  try { localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(trimmed)); } catch {}
+  renderLeaderboard();
+}
+
+function readLeaderboard() {
+  try { return JSON.parse(localStorage.getItem(LEADERBOARD_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function renderLeaderboard() {
+  if (!leaderboardBody) return;
+  const list = readLeaderboard();
+  leaderboardBody.innerHTML = '';
+  if (list.length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="6" class="empty">No scores yet. Finish a game and yours will appear here.</td>';
+    leaderboardBody.appendChild(tr);
+    return;
+  }
+  list.slice(0, 20).forEach((e, i) => {
+    const row = document.createElement('tr');
+    const rank = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1);
+    const cells = [
+      ['rank', rank],
+      ['name', e.name],
+      ['num', e.score],
+      ['num', e.lines],
+      ['', MODE_LABELS[e.mode] || e.mode],
+      ['when', formatRelative(e.ts)],
+    ];
+    for (const [cls, val] of cells) {
+      const td = document.createElement('td');
+      if (cls) td.className = cls;
+      td.textContent = String(val);
+      row.appendChild(td);
+    }
+    leaderboardBody.appendChild(row);
+  });
+}
+
+function formatRelative(ts) {
+  const diff = Date.now() - ts;
+  const s = Math.floor(diff / 1000);
+  if (s < 30) return 'just now';
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  const date = new Date(ts);
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
