@@ -55,6 +55,8 @@ let myPredicted = null;
 let inputSeq = 0;
 let lastSentSeq = 0;
 let lastWasGameOver = false;
+let localGravityInterval = null;
+let localGravityMs = null;
 let lastSavedKey = null;
 let playerName = (localStorage.getItem('tetrisPlayerName') || '').slice(0, 20);
 
@@ -154,6 +156,7 @@ ws.addEventListener('message', (e) => {
     }
     lastWasGameOver = !!state.gameOver;
     reconcileMyPiece();
+    setupLocalGravity();
     scheduleRender();
     updateHUD();
   }
@@ -210,18 +213,47 @@ function reconcileMyPiece() {
     const me = state.players.find(p => p.id === myId);
     const srv = me?.piece;
     if (!srv) { myPredicted = null; return; }
-    if (!myPredicted || myPredicted.type !== srv.type || (me.lastSeq || 0) >= lastSentSeq) {
+    if (!myPredicted || myPredicted.type !== srv.type) {
       myPredicted = { ...srv };
+    } else if ((me.lastSeq || 0) >= lastSentSeq) {
+      myPredicted = { type: srv.type, rot: srv.rot, x: srv.x, y: Math.max(srv.y, myPredicted.y) };
     }
     return;
   }
   const me = state.players.find(p => p.id === myId);
   if (!me?.piece) { myPredicted = null; return; }
   const srv = me.piece;
-  if (!myPredicted
-      || myPredicted.type !== srv.type
-      || (me.lastSeq || 0) >= lastSentSeq) {
+  if (!myPredicted || myPredicted.type !== srv.type) {
     myPredicted = { type: srv.type, rot: srv.rot, x: srv.x, y: srv.y };
+  } else if ((me.lastSeq || 0) >= lastSentSeq) {
+    myPredicted = { type: srv.type, rot: srv.rot, x: srv.x, y: Math.max(srv.y, myPredicted.y) };
+  }
+}
+
+function setupLocalGravity() {
+  const ms = state?.tickMs;
+  const wantRunning = !!(state?.running && ms && myPredicted
+                         && state.mode !== 'duo'
+                         && !(state.mode === 'relay' && state.activeSlot !== mySlot));
+  if (!wantRunning) {
+    if (localGravityInterval) { clearInterval(localGravityInterval); localGravityInterval = null; localGravityMs = null; }
+    return;
+  }
+  if (ms !== localGravityMs) {
+    if (localGravityInterval) clearInterval(localGravityInterval);
+    localGravityMs = ms;
+    localGravityInterval = setInterval(localGravityTick, ms);
+  }
+}
+
+function localGravityTick() {
+  if (!state?.running || !myPredicted) return;
+  if (state.mode === 'duo') return;
+  if (state.mode === 'relay' && state.activeSlot !== mySlot) return;
+  const next = localTryMove(myPredicted, 0, 1);
+  if (next) {
+    myPredicted = next;
+    scheduleRender();
   }
 }
 

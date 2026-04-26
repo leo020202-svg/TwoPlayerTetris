@@ -390,7 +390,7 @@ function lockPiece(room, playerId) {
 
 function tickSpeedMs(room) {
   const lvl = room.level || 1;
-  return Math.max(100, 650 - (lvl - 1) * 55);
+  return Math.max(200, 650 - (lvl - 1) * 50);
 }
 
 function restartTick(room) {
