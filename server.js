@@ -456,6 +456,10 @@ function doHold(room, playerId) {
 
 function tick(room) {
   if (!room.running) return;
+  // Only duo and relay drive piece gravity from the server. All other modes
+  // are client-authoritative for piece position; clients send 'down' / 'drop'
+  // on their own gravity timer.
+  if (room.mode !== 'duo' && room.mode !== 'relay') return;
   for (const id of room.order) {
     const p = room.players[id];
     if (!p?.piece) continue;
@@ -722,6 +726,28 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'restart' && currentRoom.gameOver) {
       if (currentRoom.order.length >= 2) startGame(currentRoom);
+      return;
+    }
+
+    if (msg.type === 'piece' && currentRoom.running) {
+      if (currentRoom.mode === 'duo' || currentRoom.mode === 'relay') return;
+      const pi = msg.piece;
+      const p2 = currentRoom.players[playerId];
+      if (!p2 || !pi) return;
+      if (typeof pi.type !== 'string' || !TYPES.includes(pi.type)) return;
+      if (typeof pi.rot !== 'number' || typeof pi.x !== 'number' || typeof pi.y !== 'number') return;
+      if (!p2.piece || p2.piece.type === pi.type) {
+        p2.piece = { type: pi.type, rot: pi.rot | 0, x: pi.x | 0, y: pi.y | 0 };
+        broadcast(currentRoom);
+      }
+      return;
+    }
+
+    if (msg.type === 'gameOver' && currentRoom.running) {
+      if (currentRoom.mode === 'duo' || currentRoom.mode === 'relay') return;
+      currentRoom.gameOver = true;
+      endGameIfNeeded(currentRoom);
+      broadcast(currentRoom);
       return;
     }
 

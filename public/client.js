@@ -69,6 +69,8 @@ let lastWasGameOver = false;
 let pendingDrop = false;
 let pendingDropTimer = null;
 let localHoldUsed = false;
+let localGravityInterval = null;
+let localGravityMs = null;
 let lastSavedKey = null;
 let playerName = (localStorage.getItem('tetrisPlayerName') || '').slice(0, 20);
 
@@ -197,6 +199,8 @@ ws.addEventListener('message', (e) => {
     }
     lastWasGameOver = !!state.gameOver;
     reconcileMyPiece();
+    setupLocalGravity();
+    resolveLocalOverlapIfNeeded();
     scheduleRender();
     updateHUD();
   }
@@ -258,13 +262,80 @@ function reconcileMyPiece() {
     }
     return;
   }
+  // Client-authoritative modes (shared / split / garbage / architect):
+  // we only adopt the server's piece position on a *type change* (= the
+  // server just spawned a fresh piece for us after a lock). For ongoing
+  // movement the client owns the piece outright, eliminating mid-flight
+  // snap-backs.
   const me = state.players.find(p => p.id === myId);
   if (!me?.piece) { myPredicted = null; clearPendingDrop(); return; }
   const srv = me.piece;
   const typeChanged = !myPredicted || myPredicted.type !== srv.type;
-  if (typeChanged || (me.lastSeq || 0) >= lastSentSeq) {
+  if (typeChanged) {
     myPredicted = { type: srv.type, rot: srv.rot, x: srv.x, y: srv.y };
-    if (typeChanged) clearPendingDrop();
+    clearPendingDrop();
+  }
+}
+
+function resolveLocalOverlapIfNeeded() {
+  // After a board change we may overlap newly raised garbage / opponent locks.
+  if (state?.mode === 'duo' || state?.mode === 'relay') return;
+  if (!myPredicted || !state?.board) return;
+  const board = state.board;
+  let bumped = 0;
+  while (pieceCells(myPredicted).some(([x, y]) =>
+    y >= 0 && y < ROWS && x >= 0 && x < COLS && board[y][x]
+  )) {
+    myPredicted = { ...myPredicted, y: myPredicted.y - 1 };
+    bumped++;
+    if (pieceCells(myPredicted).every(([, y]) => y < 0)) {
+      send({ type: 'gameOver' });
+      myPredicted = null;
+      return;
+    }
+    if (bumped > ROWS) break;
+  }
+  if (bumped > 0) sendPieceUpdate();
+}
+
+function sendPieceUpdate() {
+  if (state?.mode === 'duo' || state?.mode === 'relay') return;
+  if (!myPredicted) return;
+  send({ type: 'piece', piece: { ...myPredicted } });
+}
+
+function setupLocalGravity() {
+  const isClientAuth = state?.mode && state.mode !== 'duo' && state.mode !== 'relay';
+  const wantRunning = !!(state?.running && state?.tickMs && myPredicted && isClientAuth);
+  if (!wantRunning) {
+    if (localGravityInterval) { clearInterval(localGravityInterval); localGravityInterval = null; localGravityMs = null; }
+    return;
+  }
+  if (state.tickMs !== localGravityMs) {
+    if (localGravityInterval) clearInterval(localGravityInterval);
+    localGravityMs = state.tickMs;
+    localGravityInterval = setInterval(localGravityTick, state.tickMs);
+  }
+}
+
+function localGravityTick() {
+  if (!state?.running || !myPredicted) return;
+  if (state.mode === 'duo' || state.mode === 'relay') return;
+  if (pendingDrop) return;
+  const next = localTryMove(myPredicted, 0, 1);
+  if (next) {
+    myPredicted = next;
+    inputSeq++;
+    lastSentSeq = inputSeq;
+    if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'down', seq: inputSeq }));
+    scheduleRender();
+  } else {
+    pendingDrop = true;
+    if (pendingDropTimer) clearTimeout(pendingDropTimer);
+    pendingDropTimer = setTimeout(() => { pendingDrop = false; pendingDropTimer = null; }, 1500);
+    inputSeq++;
+    lastSentSeq = inputSeq;
+    if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'drop', seq: inputSeq }));
   }
 }
 
