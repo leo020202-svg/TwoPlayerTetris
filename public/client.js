@@ -55,10 +55,9 @@ let myPredicted = null;
 let inputSeq = 0;
 let lastSentSeq = 0;
 let lastWasGameOver = false;
-let localGravityInterval = null;
-let localGravityMs = null;
 let pendingDrop = false;
 let pendingDropTimer = null;
+let localHoldUsed = false;
 let lastSavedKey = null;
 let playerName = (localStorage.getItem('tetrisPlayerName') || '').slice(0, 20);
 
@@ -158,7 +157,6 @@ ws.addEventListener('message', (e) => {
     }
     lastWasGameOver = !!state.gameOver;
     reconcileMyPiece();
-    setupLocalGravity();
     scheduleRender();
     updateHUD();
   }
@@ -215,55 +213,27 @@ function reconcileMyPiece() {
     const me = state.players.find(p => p.id === myId);
     const srv = me?.piece;
     if (!srv) { myPredicted = null; return; }
-    if (!myPredicted || myPredicted.type !== srv.type) {
-      myPredicted = { ...srv };
-    } else if ((me.lastSeq || 0) >= lastSentSeq) {
-      myPredicted = { type: srv.type, rot: srv.rot, x: srv.x, y: Math.max(srv.y, myPredicted.y) };
+    if (!myPredicted || myPredicted.type !== srv.type || (me.lastSeq || 0) >= lastSentSeq) {
+      myPredicted = { type: srv.type, rot: srv.rot, x: srv.x, y: srv.y };
     }
     return;
   }
   const me = state.players.find(p => p.id === myId);
   if (!me?.piece) { myPredicted = null; clearPendingDrop(); return; }
   const srv = me.piece;
-  if (!myPredicted || myPredicted.type !== srv.type) {
+  const typeChanged = !myPredicted || myPredicted.type !== srv.type;
+  if (typeChanged || (me.lastSeq || 0) >= lastSentSeq) {
     myPredicted = { type: srv.type, rot: srv.rot, x: srv.x, y: srv.y };
-    clearPendingDrop();
-  } else if ((me.lastSeq || 0) >= lastSentSeq) {
-    myPredicted = { type: srv.type, rot: srv.rot, x: srv.x, y: Math.max(srv.y, myPredicted.y) };
+    if (typeChanged) clearPendingDrop();
   }
 }
 
 function clearPendingDrop() {
   pendingDrop = false;
   if (pendingDropTimer) { clearTimeout(pendingDropTimer); pendingDropTimer = null; }
+  localHoldUsed = false;
 }
 
-function setupLocalGravity() {
-  const ms = state?.tickMs;
-  const wantRunning = !!(state?.running && ms && myPredicted
-                         && state.mode !== 'duo'
-                         && !(state.mode === 'relay' && state.activeSlot !== mySlot));
-  if (!wantRunning) {
-    if (localGravityInterval) { clearInterval(localGravityInterval); localGravityInterval = null; localGravityMs = null; }
-    return;
-  }
-  if (ms !== localGravityMs) {
-    if (localGravityInterval) clearInterval(localGravityInterval);
-    localGravityMs = ms;
-    localGravityInterval = setInterval(localGravityTick, ms);
-  }
-}
-
-function localGravityTick() {
-  if (!state?.running || !myPredicted || pendingDrop) return;
-  if (state.mode === 'duo') return;
-  if (state.mode === 'relay' && state.activeSlot !== mySlot) return;
-  const next = localTryMove(myPredicted, 0, 1);
-  if (next) {
-    myPredicted = next;
-    scheduleRender();
-  }
-}
 
 function send(payload) {
   if (ws.readyState !== 1) return;
@@ -398,7 +368,6 @@ function attemptLocalRotate() {
 function attemptLocalHardDrop() {
   if (!canControl() || !myPredicted || pendingDrop) return false;
   if (state.mode === 'duo') return false;
-  myPredicted = localHardDrop(myPredicted);
   pendingDrop = true;
   if (pendingDropTimer) clearTimeout(pendingDropTimer);
   pendingDropTimer = setTimeout(() => { pendingDrop = false; pendingDropTimer = null; }, 1500);
@@ -412,7 +381,12 @@ function doMove(action) {
   else if (action === 'right') moved = attemptLocalMove(1, 0);
   else if (action === 'down') moved = attemptLocalMove(0, 1);
   else if (action === 'rotate') moved = attemptLocalRotate();
-  else if (action === 'drop') moved = attemptLocalHardDrop();
+  else if (action === 'drop') {
+    if (!attemptLocalHardDrop()) return;
+  } else if (action === 'hold') {
+    if (!canControl() || !myPredicted || pendingDrop || localHoldUsed) return;
+    localHoldUsed = true;
+  }
   send(action);
   if (moved) scheduleRender();
 }
