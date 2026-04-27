@@ -130,6 +130,34 @@ html, body {
   box-shadow: 0 0 0 2px rgba(76,207,255,0.18);
 }
 
+.color-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.color-swatches {
+  display: flex;
+  gap: 4px;
+}
+
+.color-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 2px solid #1b2747;
+  padding: 0;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.color-swatch:hover { transform: scale(1.15); }
+.color-swatch.selected {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.25);
+}
+
 .leaderboard-panel {
   margin: 0 auto;
   max-width: 840px;

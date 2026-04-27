@@ -318,7 +318,8 @@ function lockPiece(room, playerId) {
   const p = room.players[playerId];
   if (!p?.piece) return;
   if (!resolveBoardOverlap(room, playerId)) return;
-  const color = COLOR_INDEX[p.piece.type];
+  const slot = room.order.indexOf(playerId);
+  const color = 100 + slot;
   for (const [x, y] of pieceCells(p.piece)) {
     if (y >= 0 && y < ROWS && x >= 0 && x < COLS) room.board[y][x] = color;
   }
@@ -504,6 +505,7 @@ function broadcast(room) {
         next: (pl?.queue ?? []).slice(0, 3),
         score: pl?.score ?? 0,
         lastSeq: pl?.lastSeq ?? 0,
+        color: pl?.color ?? null,
       };
     }),
     running: room.running,
@@ -595,7 +597,7 @@ function addPlayerToRoom(room, ws, playerId) {
   room.order.push(playerId);
   room.players[playerId] = {
     piece: null, hold: null, holdUsed: false,
-    queue: [], bag: [], score: 0, lastSeq: 0,
+    queue: [], bag: [], score: 0, lastSeq: 0, color: null,
   };
   room.sockets[playerId] = ws;
   ws.roomCode = room.code;
@@ -704,6 +706,17 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'setMode') {
       setRoomMode(currentRoom, msg.mode);
+      return;
+    }
+
+    if (msg.type === 'setColor') {
+      const c = typeof msg.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(msg.color)
+        ? msg.color : null;
+      const p = currentRoom.players[playerId];
+      if (p) {
+        p.color = c;
+        broadcast(currentRoom);
+      }
       return;
     }
 

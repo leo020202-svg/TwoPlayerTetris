@@ -20,7 +20,18 @@ const LOCKED_COLORS = [
   '#6b7280',
 ];
 
-const PLAYER_COLORS = ['#4ccfff', '#ff4d6d'];
+const DEFAULT_PLAYER_COLORS = ['#4ccfff', '#ff4d6d'];
+
+const COLOR_PRESETS = [
+  '#4ccfff', '#ff4d6d', '#ffd93d', '#7ae582',
+  '#c77dff', '#ff9f43', '#5c7aff', '#f8f8f8',
+];
+
+function playerColor(slot) {
+  const stored = state?.players?.[slot]?.color;
+  if (stored) return stored;
+  return DEFAULT_PLAYER_COLORS[slot] || '#fff';
+}
 
 const SHAPES_PREVIEW = {
   I: [[1,1,1,1]],
@@ -93,6 +104,8 @@ const gameAreaEl = document.querySelector('.gameArea');
 const nameInput = document.getElementById('nameInput');
 const leaderboardBody = document.getElementById('leaderboardBody');
 const clearLeaderboardBtn = document.getElementById('clearLeaderboard');
+const colorSwatchesEl = document.getElementById('colorSwatches');
+let chosenColor = localStorage.getItem('tetrisPlayerColor') || null;
 
 if (nameInput) nameInput.value = playerName;
 nameInput?.addEventListener('input', () => {
@@ -108,6 +121,32 @@ clearLeaderboardBtn?.addEventListener('click', () => {
 setCanvasSize(canvas1, BLOCK);
 document.getElementById('highScore').textContent = highScore;
 renderLeaderboard();
+buildColorSwatches();
+
+function buildColorSwatches() {
+  if (!colorSwatchesEl) return;
+  colorSwatchesEl.innerHTML = '';
+  for (const c of COLOR_PRESETS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'color-swatch';
+    btn.style.background = c;
+    btn.dataset.color = c;
+    btn.title = c;
+    if (c === chosenColor) btn.classList.add('selected');
+    btn.addEventListener('click', () => pickColor(c));
+    colorSwatchesEl.appendChild(btn);
+  }
+}
+
+function pickColor(c) {
+  chosenColor = c;
+  localStorage.setItem('tetrisPlayerColor', c);
+  for (const el of colorSwatchesEl.querySelectorAll('.color-swatch')) {
+    el.classList.toggle('selected', el.dataset.color === c);
+  }
+  send({ type: 'setColor', color: c });
+}
 
 const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
 const ws = new WebSocket(`${wsProto}//${location.host}`);
@@ -127,6 +166,7 @@ ws.addEventListener('message', (e) => {
     myPredicted = null;
     inputSeq = 0;
     lastSentSeq = 0;
+    if (chosenColor) send({ type: 'setColor', color: chosenColor });
     setRoomMsg('');
   } else if (msg.type === 'error') {
     setRoomMsg(msg.message, 'error');
@@ -480,7 +520,7 @@ function render() {
     for (let r = 0; r < ROWS; r++) {
       for (let col = 0; col < COLS; col++) {
         const v = board[r][col];
-        if (v) drawBlock(ctx, col * BLOCK, r * BLOCK, BLOCK, LOCKED_COLORS[v] || '#888', 'rgba(0,0,0,0.35)');
+        if (v) drawBlock(ctx, col * BLOCK, r * BLOCK, BLOCK, lockedCellColor(v), 'rgba(0,0,0,0.35)');
         else if (state.mode !== 'architect' || !isSilhouetteCell(col, r)) drawGridCell(ctx, col, r, BLOCK);
       }
     }
@@ -500,20 +540,23 @@ function render() {
     for (const p of pieces) {
       const effective = p.isMe ? myPredicted : p.piece;
       if (!effective) continue;
-      const color = PLAYER_COLORS[p.slot] || '#fff';
+      const color = playerColor(p.slot);
       for (const [x, y] of ghostCellsClamped(board, effective, p.slot)) {
         if (y < 0) continue;
-        drawGhost(ctx, x, y, color, BLOCK);
+        drawGhost(ctx, x, y, color, BLOCK, p.id !== myId);
       }
     }
 
     for (const p of pieces) {
       const effective = p.isMe ? myPredicted : p.piece;
       if (!effective) continue;
-      const color = PLAYER_COLORS[p.slot] || '#fff';
+      const color = playerColor(p.slot);
+      const isMe = p.id === myId;
+      const fill = isMe ? color : hexToRgba(color, 0.55);
+      const stroke = isMe ? '#fff' : hexToRgba(color, 0.35);
       for (const [x, y] of pieceCells(effective)) {
         if (y < 0) continue;
-        drawBlock(ctx, x * BLOCK, y * BLOCK, BLOCK, color, p.isMe ? '#fff' : 'rgba(255,255,255,0.4)');
+        drawBlock(ctx, x * BLOCK, y * BLOCK, BLOCK, fill, stroke);
       }
     }
   }
@@ -544,9 +587,9 @@ function render() {
   for (let slot = 0; slot < 2; slot++) {
     const pl = state.players[slot];
     const prefix = `p${slot + 1}`;
-    drawPreview(`${prefix}Hold`, pl?.hold, PLAYER_COLORS[slot]);
+    drawPreview(`${prefix}Hold`, pl?.hold, playerColor(slot));
     for (let i = 0; i < 3; i++) {
-      drawPreview(`${prefix}Next${i}`, pl?.next?.[i], PLAYER_COLORS[slot]);
+      drawPreview(`${prefix}Next${i}`, pl?.next?.[i], playerColor(slot));
     }
   }
 }
@@ -576,6 +619,11 @@ function drawDivider(ctx, canvas) {
 function isSilhouetteCell(x, y) {
   if (!state?.silhouette) return false;
   return state.silhouette.some(([sx, sy]) => sx === x && sy === y);
+}
+
+function lockedCellColor(v) {
+  if (v >= 100) return playerColor(v - 100);
+  return LOCKED_COLORS[v] || '#888';
 }
 
 function drawSilhouetteCell(g, x, y, block, satisfied) {
@@ -669,12 +717,14 @@ function drawBlock(g, px, py, size, fill, stroke) {
   g.fillRect(px + 2, py + 2, size - 4, Math.max(3, Math.floor(size * 0.15)));
 }
 
-function drawGhost(g, x, y, color, block) {
+function drawGhost(g, x, y, color, block, dim = false) {
   const px = x * block, py = y * block;
-  g.fillStyle = hexToRgba(color, 0.10);
+  const fillA = dim ? 0.04 : 0.10;
+  const strokeA = dim ? 0.25 : 0.55;
+  g.fillStyle = hexToRgba(color, fillA);
   g.fillRect(px, py, block, block);
-  g.strokeStyle = hexToRgba(color, 0.55);
-  g.lineWidth = 2;
+  g.strokeStyle = hexToRgba(color, strokeA);
+  g.lineWidth = dim ? 1 : 2;
   g.setLineDash([4, 3]);
   g.strokeRect(px + 2, py + 2, block - 4, block - 4);
   g.setLineDash([]);
@@ -704,7 +754,7 @@ function drawPreview(canvasId, type, accent) {
   const cell = Math.floor(Math.min((c.width - 12) / w, (c.height - 12) / h));
   const ox = Math.floor((c.width - cell * w) / 2);
   const oy = Math.floor((c.height - cell * h) / 2);
-  const fill = LOCKED_COLORS[COLOR_INDEX[type]] || accent;
+  const fill = accent;
   for (let r = 0; r < h; r++) {
     for (let col = 0; col < w; col++) {
       if (!shape[r][col]) continue;
