@@ -14,6 +14,16 @@ import {
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
 
+function logLine(...args) {
+  console.log(new Date().toISOString(), ...args);
+}
+function logRoom(room, ...args) {
+  logLine(`room=${room?.code ?? '----'}`, ...args);
+}
+function logErr(...args) {
+  console.error(new Date().toISOString(), 'ERR', ...args);
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js':   'application/javascript; charset=utf-8',
@@ -24,17 +34,23 @@ const MIME = {
 const server = http.createServer((req, res) => {
   const urlPath = req.url === '/' ? '/index.html' : req.url.split('?')[0];
   const filePath = path.join(__dirname, 'public', urlPath);
+  const ip = req.headers['fly-client-ip'] || req.socket.remoteAddress || '?';
   if (!filePath.startsWith(path.join(__dirname, 'public'))) {
+    logLine(`http 403 ${req.method} ${urlPath} ip=${ip}`);
     res.writeHead(403); res.end('Forbidden'); return;
   }
   fs.readFile(filePath, (err, data) => {
-    if (err) { res.writeHead(404); res.end('Not found'); return; }
+    if (err) {
+      logLine(`http 404 ${req.method} ${urlPath} ip=${ip}`);
+      res.writeHead(404); res.end('Not found'); return;
+    }
     const ext = path.extname(filePath);
     res.writeHead(200, {
       'Content-Type': MIME[ext] || 'application/octet-stream',
       'Cache-Control': 'no-cache',
     });
     res.end(data);
+    logLine(`http 200 ${req.method} ${urlPath} ip=${ip} ua="${(req.headers['user-agent']||'').slice(0,60)}"`);
   });
 });
 
@@ -171,6 +187,7 @@ function generateCode() {
 
 function createRoom() {
   const code = generateCode();
+  logLine(`room=${code} created (total rooms=${rooms.size + 1})`);
   const room = {
     code,
     mode: 'shared',
@@ -200,6 +217,7 @@ function deleteRoomIfEmpty(room) {
   if (room.order.length === 0) {
     clearRoomTimers(room);
     rooms.delete(room.code);
+    logLine(`room=${room.code} deleted (total rooms=${rooms.size})`);
   }
 }
 
@@ -293,6 +311,7 @@ function spawnPiece(room, playerId, forcedType = null) {
   if (bad) {
     room.gameOver = true;
     endGameIfNeeded(room);
+    logRoom(room, `top-out on spawn slot=${slot} type=${type} mode=${room.mode}`);
     return null;
   }
   return piece;
@@ -317,6 +336,10 @@ function resolveBoardOverlap(room, playerId) {
 function lockPiece(room, playerId) {
   const p = room.players[playerId];
   if (!p?.piece) return;
+  const lockSlot = room.order.indexOf(playerId);
+  const lockType = p.piece.type;
+  const lockX = p.piece.x;
+  const lockY = p.piece.y;
   if (!resolveBoardOverlap(room, playerId)) return;
   const slot = room.order.indexOf(playerId);
   const color = 100 + slot;
@@ -344,6 +367,7 @@ function lockPiece(room, playerId) {
     }
     room.clearAnim = Date.now();
   }
+  logRoom(room, `lock slot=${lockSlot} type=${lockType} pos=(${lockX},${lockY}) cleared=${cleared} score=${room.score} lines=${room.lines} level=${room.level}`);
 
   for (const otherId of room.order) {
     if (otherId === playerId) continue;
@@ -476,6 +500,7 @@ function raiseGarbage(room) {
   if (room.board[0].some(v => v)) {
     room.gameOver = true;
     endGameIfNeeded(room);
+    logRoom(room, `garbage rise pushed top-out — game over`);
     broadcast(room);
     return;
   }
@@ -489,6 +514,7 @@ function raiseGarbage(room) {
     if (p?.piece) resolveBoardOverlap(room, id);
   }
   room.nextGarbageAt = Date.now() + GARBAGE_INTERVAL_MS;
+  logRoom(room, `garbage rose hole=col${hole}`);
   broadcast(room);
 }
 
@@ -589,6 +615,7 @@ function startGame(room) {
     room.garbageInterval = setInterval(() => raiseGarbage(room), GARBAGE_INTERVAL_MS);
   }
 
+  logRoom(room, `game started mode=${room.mode} players=${room.order.length} silhouette=${room.silhouette?.name || '-'} tickMs=${tickSpeedMs(room)}`);
   broadcast(room);
 }
 
@@ -624,8 +651,12 @@ function removePlayerFromRoom(room, playerId) {
 }
 
 function setRoomMode(room, mode) {
-  if (!VALID_MODES.includes(mode)) return;
+  if (!VALID_MODES.includes(mode)) {
+    logRoom(room, `setMode rejected: invalid mode "${mode}"`);
+    return;
+  }
   if (room.mode === mode) return;
+  logRoom(room, `mode changed ${room.mode} -> ${mode}`);
   room.mode = mode;
   if (room.order.length === 2) {
     startGame(room);
@@ -662,13 +693,15 @@ function recordSeq(p, msg) {
   }
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   const playerId = String(nextPlayerId++);
   ws.playerId = playerId;
+  ws.connectIp = (req?.headers?.['fly-client-ip']) || req?.socket?.remoteAddress || '?';
 
   const room = createRoom();
   addPlayerToRoom(room, ws, playerId);
   sendWelcome(ws, room, playerId);
+  logLine(`player=${playerId} connected ip=${ws.connectIp} room=${room.code} slot=0`);
   broadcast(room);
 
   ws.on('message', (data) => {
@@ -679,16 +712,27 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'join') {
       const target = typeof msg.code === 'string' ? msg.code.toUpperCase().trim() : '';
-      if (!/^[A-Z2-9]{4}$/.test(target)) { sendError(ws, 'Invalid code'); return; }
+      if (!/^[A-Z2-9]{4}$/.test(target)) {
+        logLine(`player=${playerId} join rejected: invalid format "${msg.code}"`);
+        sendError(ws, 'Invalid code'); return;
+      }
       if (target === currentRoom.code) { sendError(ws, "You're already in this room"); return; }
       const targetRoom = rooms.get(target);
-      if (!targetRoom) { sendError(ws, 'Room not found'); return; }
-      if (targetRoom.order.length >= 2) { sendError(ws, 'Room is full'); return; }
+      if (!targetRoom) {
+        logLine(`player=${playerId} join rejected: room=${target} not found`);
+        sendError(ws, 'Room not found'); return;
+      }
+      if (targetRoom.order.length >= 2) {
+        logLine(`player=${playerId} join rejected: room=${target} full`);
+        sendError(ws, 'Room is full'); return;
+      }
+      const oldCode = currentRoom.code;
       removePlayerFromRoom(currentRoom, playerId);
       broadcast(currentRoom);
       deleteRoomIfEmpty(currentRoom);
       addPlayerToRoom(targetRoom, ws, playerId);
       sendWelcome(ws, targetRoom, playerId);
+      logLine(`player=${playerId} joined room=${targetRoom.code} slot=${targetRoom.order.indexOf(playerId)} (left room=${oldCode})`);
       if (targetRoom.order.length === 2 && !targetRoom.running && !targetRoom.gameOver) {
         startGame(targetRoom);
       } else {
@@ -698,12 +742,14 @@ wss.on('connection', (ws) => {
     }
 
     if (msg.type === 'newRoom') {
+      const oldCode = currentRoom.code;
       removePlayerFromRoom(currentRoom, playerId);
       broadcast(currentRoom);
       deleteRoomIfEmpty(currentRoom);
       const fresh = createRoom();
       addPlayerToRoom(fresh, ws, playerId);
       sendWelcome(ws, fresh, playerId);
+      logLine(`player=${playerId} newRoom room=${fresh.code} (left room=${oldCode})`);
       broadcast(fresh);
       return;
     }
@@ -719,12 +765,14 @@ wss.on('connection', (ws) => {
       const p = currentRoom.players[playerId];
       if (p) {
         p.color = c;
+        logRoom(currentRoom, `color slot=${currentRoom.order.indexOf(playerId)} color=${c || 'default'}`);
         broadcast(currentRoom);
       }
       return;
     }
 
     if (msg.type === 'restart' && currentRoom.gameOver) {
+      logRoom(currentRoom, `restart requested by slot=${currentRoom.order.indexOf(playerId)}`);
       if (currentRoom.order.length >= 2) startGame(currentRoom);
       return;
     }
@@ -745,6 +793,7 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'gameOver' && currentRoom.running) {
       if (currentRoom.mode === 'duo' || currentRoom.mode === 'relay') return;
+      logRoom(currentRoom, `game over signaled by slot=${currentRoom.order.indexOf(playerId)} score=${currentRoom.score} lines=${currentRoom.lines} level=${currentRoom.level}`);
       currentRoom.gameOver = true;
       endGameIfNeeded(currentRoom);
       broadcast(currentRoom);
@@ -780,15 +829,28 @@ wss.on('connection', (ws) => {
     broadcast(currentRoom);
   });
 
-  ws.on('close', () => {
+  ws.on('close', (code, reason) => {
     const room = rooms.get(ws.roomCode);
+    const reasonStr = reason ? reason.toString() : '';
+    logLine(`player=${playerId} disconnected code=${code} reason="${reasonStr.slice(0,80)}" room=${ws.roomCode || '-'}`);
     if (!room) return;
     removePlayerFromRoom(room, playerId);
     broadcast(room);
     deleteRoomIfEmpty(room);
   });
+
+  ws.on('error', (err) => {
+    logErr(`player=${playerId} ws error: ${err?.message || err}`);
+  });
 });
 
 server.listen(PORT, () => {
-  console.log(`Co-op Tetris running at http://localhost:${PORT}`);
+  logLine(`Co-op Tetris running at http://localhost:${PORT}`);
+});
+
+process.on('uncaughtException', (err) => {
+  logErr(`uncaughtException: ${err?.stack || err}`);
+});
+process.on('unhandledRejection', (reason) => {
+  logErr(`unhandledRejection: ${reason}`);
 });
