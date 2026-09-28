@@ -4,23 +4,26 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <title>Two Player Tetris — Play Co-op Tetris Online With a Friend</title>
-  <meta name="description" content="Play two-player Tetris online for free. Share one piece or race on split fields — create a room, send the code, and play co-op Tetris with a friend in seconds. No sign-up." />
+  <title>Two Player Tetris Online: Free Co-op Block Puzzle for 2</title>
+  <meta name="description" content="Play a free co-op block puzzle with a friend in your browser. Six team modes, no sign-up — make a room, share the 4-character code and start stacking." />
   <link rel="canonical" href="https://twoplayertetris.com/" />
+  <meta name="theme-color" content="#05080f" />
 
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Two Player Tetris" />
   <meta property="og:url" content="https://twoplayertetris.com/" />
-  <meta property="og:title" content="Two Player Tetris — Play Co-op Tetris Online With a Friend" />
-  <meta property="og:description" content="One piece. Two players. Cooperate. Create a room, share the code, and play Tetris together — free, no sign-up." />
+  <meta property="og:title" content="Two Player Tetris — Play Co-op Online With a Friend" />
+  <meta property="og:description" content="One board. Two players. Cooperate. Six free co-op modes — create a room, share the code and play together in your browser. No sign-up." />
   <meta property="og:image" content="https://twoplayertetris.com/og-image.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Two Player Tetris — one board, two players, cooperate" />
 
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Two Player Tetris — Play Co-op Tetris Online" />
-  <meta name="twitter:description" content="One piece. Two players. Cooperate. Free online co-op Tetris — just share a room code." />
+  <meta name="twitter:title" content="Two Player Tetris — Play Co-op Online With a Friend" />
+  <meta name="twitter:description" content="One board. Two players. Cooperate. Free co-op block puzzle for two — just share a room code." />
   <meta name="twitter:image" content="https://twoplayertetris.com/og-image.png" />
 
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -30,31 +33,61 @@
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
-    "@type": "VideoGame",
-    "name": "Two Player Tetris",
-    "url": "https://twoplayertetris.com/",
-    "description": "Free online co-op and competitive two-player Tetris. Share one piece or play split fields across six modes — create a room and share the code to play with a friend.",
-    "genre": ["Puzzle", "Multiplayer"],
-    "gamePlatform": "Web Browser",
-    "applicationCategory": "Game",
-    "playMode": ["CoOp", "MultiPlayer"],
-    "operatingSystem": "Any (web browser)",
-    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+    "@graph": [
+      {
+        "@type": ["VideoGame", "WebApplication"],
+        "@id": "https://twoplayertetris.com/#game",
+        "name": "Two Player Tetris",
+        "url": "https://twoplayertetris.com/",
+        "description": "Free online co-op block puzzle for two players. Six cooperative modes on one shared board — create a room and share a 4-character code to play with a friend in your browser.",
+        "image": "https://twoplayertetris.com/og-image.png",
+        "genre": ["Puzzle", "Multiplayer"],
+        "gamePlatform": "Web Browser",
+        "applicationCategory": "Game",
+        "operatingSystem": "Any (web browser)",
+        "inLanguage": "en",
+        "playMode": ["https://schema.org/CoOp", "https://schema.org/MultiPlayer"],
+        "numberOfPlayers": { "@type": "QuantitativeValue", "minValue": 2, "maxValue": 2 },
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "publisher": { "@id": "https://twoplayertetris.com/#organization" }
+      },
+      {
+        "@type": "Organization",
+        "@id": "https://twoplayertetris.com/#organization",
+        "name": "Two Player Tetris",
+        "url": "https://twoplayertetris.com/",
+        "logo": "https://twoplayertetris.com/favicon.svg"
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://twoplayertetris.com/#website",
+        "url": "https://twoplayertetris.com/",
+        "name": "Two Player Tetris",
+        "inLanguage": "en",
+        "publisher": { "@id": "https://twoplayertetris.com/#organization" }
+      }
+    ]
   }
   </script>
 </head>
 <body>
   <div class="page">
-    <h1 class="visually-hidden">Two Player Tetris — Play Co-op Tetris Online With a Friend</h1>
+    <header class="site-header">
+      <h1>Two Player Tetris</h1>
+      <p class="tagline"><strong>One board. Two players. Cooperate.</strong> Free co-op in your browser — share a room code, no sign-up.</p>
+    </header>
+
     <div class="room-bar">
       <div class="room-code-group">
-        <span class="room-label">YOUR CODE</span>
-        <span class="room-code" id="roomCode">----</span>
-        <button type="button" id="copyCode" class="btn ghost">COPY</button>
+        <span class="room-label" id="roomCodeLabel">YOUR CODE</span>
+        <span class="room-code" id="roomCode" aria-labelledby="roomCodeLabel" aria-live="polite">----</span>
+        <button type="button" id="copyCode" class="btn ghost" aria-label="Copy your room code">COPY</button>
       </div>
       <form class="room-join" id="joinForm" autocomplete="off">
+        <label for="joinInput" class="visually-hidden">Friend's room code</label>
         <input
           id="joinInput"
+          name="code"
           maxlength="4"
           placeholder="ENTER CODE"
           inputmode="latin"
@@ -64,89 +97,100 @@
       </form>
       <button type="button" id="newRoomBtn" class="btn ghost">NEW ROOM</button>
       <div class="name-group">
-        <span class="room-label">NAME</span>
-        <input id="nameInput" maxlength="20" placeholder="Anonymous" />
+        <label for="nameInput" class="room-label">NAME</label>
+        <input id="nameInput" name="name" maxlength="20" placeholder="Anonymous" autocomplete="nickname" />
       </div>
-      <div class="color-group">
-        <span class="room-label">COLOR</span>
+      <div class="color-group" role="group" aria-labelledby="colorLabel">
+        <span class="room-label" id="colorLabel">COLOR</span>
         <div class="color-swatches" id="colorSwatches"></div>
       </div>
-      <div class="room-msg" id="roomMsg"></div>
+      <div class="room-msg" id="roomMsg" role="status"></div>
     </div>
 
     <div class="mode-bar">
-      <span class="mode-label">MODE</span>
-      <div class="mode-toggle">
-        <button type="button" id="modeShared" class="mode-btn active">Shared field</button>
-        <button type="button" id="modeSplit" class="mode-btn">Split field</button>
-        <button type="button" id="modeGarbage" class="mode-btn">Garbage Survival</button>
-        <button type="button" id="modeRelay" class="mode-btn">Relay</button>
-        <button type="button" id="modeDuo" class="mode-btn">Duo Controls</button>
-        <button type="button" id="modeArchitect" class="mode-btn">Architect</button>
+      <span class="mode-label" id="modeLabel">MODE</span>
+      <div class="mode-toggle" role="group" aria-labelledby="modeLabel">
+        <button type="button" id="modeShared" class="mode-btn active" aria-pressed="true">Shared field</button>
+        <button type="button" id="modeSplit" class="mode-btn" aria-pressed="false">Split field</button>
+        <button type="button" id="modeGarbage" class="mode-btn" aria-pressed="false">Garbage Survival</button>
+        <button type="button" id="modeRelay" class="mode-btn" aria-pressed="false">Relay</button>
+        <button type="button" id="modeDuo" class="mode-btn" aria-pressed="false">Duo Controls</button>
+        <button type="button" id="modeArchitect" class="mode-btn" aria-pressed="false">Architect</button>
       </div>
     </div>
 
     <div class="topstats">
       <div class="stat-box">
-        <h3>TEAM SCORE</h3>
+        <div class="stat-label">TEAM SCORE</div>
         <div class="value" id="teamScore">0</div>
       </div>
       <div class="stat-box">
-        <h3>LEVEL</h3>
+        <div class="stat-label">LEVEL</div>
         <div class="value" id="level">1</div>
       </div>
       <div class="stat-box">
-        <h3>LINES</h3>
+        <div class="stat-label">LINES</div>
         <div class="value" id="lines">0</div>
       </div>
       <div class="stat-box highlight">
-        <h3>HIGH SCORE</h3>
+        <div class="stat-label">HIGH SCORE</div>
         <div class="value" id="highScore">0</div>
       </div>
     </div>
 
-    <div class="mode-banner" id="modeBanner" hidden></div>
+    <div class="mode-banner" id="modeBanner" role="status" hidden></div>
 
     <div class="gameArea">
-      <aside class="player-panel p1" id="p1Panel">
+      <aside class="player-panel p1" id="p1Panel" aria-label="Player 1">
         <div class="player-header">
-          <h2>Player 1</h2>
+          <div class="player-name">Player 1</div>
           <span class="score" id="p1Score">0</span>
           <span class="you-badge" id="p1You" hidden>YOU</span>
         </div>
         <div class="section">
-          <h4>HOLD</h4>
-          <canvas class="mini" id="p1Hold" width="112" height="80"></canvas>
+          <div class="section-label">HOLD</div>
+          <canvas class="mini" id="p1Hold" width="112" height="80" role="img" aria-label="Player 1 held piece"></canvas>
         </div>
         <div class="section">
-          <h4>NEXT</h4>
+          <div class="section-label">NEXT</div>
           <div class="next-queue">
-            <canvas class="mini" id="p1Next0" width="112" height="80"></canvas>
-            <canvas class="mini" id="p1Next1" width="112" height="80"></canvas>
-            <canvas class="mini" id="p1Next2" width="112" height="80"></canvas>
+            <canvas class="mini" id="p1Next0" width="112" height="80" role="img" aria-label="Player 1 next piece"></canvas>
+            <canvas class="mini" id="p1Next1" width="112" height="80" role="img" aria-label="Player 1 second next piece"></canvas>
+            <canvas class="mini" id="p1Next2" width="112" height="80" role="img" aria-label="Player 1 third next piece"></canvas>
           </div>
         </div>
       </aside>
 
-      <canvas id="board" width="300" height="600"></canvas>
-      <canvas id="board2" width="240" height="480" hidden></canvas>
+      <canvas id="board" width="300" height="600" role="img" aria-label="Shared game board">
+        The game board needs a browser with canvas support.
+      </canvas>
+      <canvas id="board2" width="240" height="480" role="img" aria-label="Second game board" hidden></canvas>
 
-      <aside class="player-panel p2" id="p2Panel">
+      <div class="touch-controls" id="touchControls" hidden>
+        <button type="button" class="touch-btn" data-action="hold" aria-label="Hold piece">HOLD</button>
+        <button type="button" class="touch-btn" data-action="rotate" aria-label="Rotate"><span class="arrow" aria-hidden="true">&#x27F3;</span></button>
+        <button type="button" class="touch-btn primary" data-action="drop" aria-label="Hard drop">DROP</button>
+        <button type="button" class="touch-btn" data-action="left" aria-label="Move left"><span class="arrow" aria-hidden="true">&#x25C0;</span></button>
+        <button type="button" class="touch-btn" data-action="down" aria-label="Soft drop"><span class="arrow" aria-hidden="true">&#x25BC;</span></button>
+        <button type="button" class="touch-btn" data-action="right" aria-label="Move right"><span class="arrow" aria-hidden="true">&#x25B6;</span></button>
+      </div>
+
+      <aside class="player-panel p2" id="p2Panel" aria-label="Player 2">
         <div class="player-header">
-          <h2>Player 2</h2>
+          <div class="player-name">Player 2</div>
           <span class="score" id="p2Score">0</span>
           <span class="you-badge" id="p2You" hidden>YOU</span>
         </div>
         <div class="section">
-          <h4>HOLD</h4>
-          <canvas class="mini" id="p2Hold" width="112" height="80"></canvas>
+          <div class="section-label">HOLD</div>
+          <canvas class="mini" id="p2Hold" width="112" height="80" role="img" aria-label="Player 2 held piece"></canvas>
         </div>
         <div class="section">
-          <h4>NEXT</h4>
+          <div class="section-label">NEXT</div>
           <div class="next-queue">
-            <canvas class="mini" id="p2Next0" width="112" height="80"></canvas>
-            <canvas class="mini" id="p2Next1" width="112" height="80"></canvas>
-            <canvas class="mini" id="p2Next2" width="112" height="80"></canvas>
+            <canvas class="mini" id="p2Next0" width="112" height="80" role="img" aria-label="Player 2 next piece"></canvas>
+            <canvas class="mini" id="p2Next1" width="112" height="80" role="img" aria-label="Player 2 second next piece"></canvas>
+            <canvas class="mini" id="p2Next2" width="112" height="80" role="img" aria-label="Player 2 third next piece"></canvas>
           </div>
         </div>
       </aside>
@@ -154,11 +198,11 @@
 
     <div class="bottom">
       <div class="panel">
-        <h3>Controls</h3>
+        <h2>Controls</h2>
         <div id="controlsDefault">
           <div class="ctrl-row"><kbd>&larr;</kbd><kbd>&rarr;</kbd> move <kbd>&uarr;</kbd> rotate <kbd>&darr;</kbd> soft drop</div>
           <div class="ctrl-row"><kbd>Space</kbd> hard drop <kbd>C</kbd> or <kbd>Shift</kbd> hold</div>
-          <div class="ctrl-row muted">WASD also works. After a game over, press <kbd>R</kbd> or <kbd>Enter</kbd> to restart.</div>
+          <div class="ctrl-row muted">WASD also works. On a phone or tablet, use the on-screen buttons under the board. After a game over, press <kbd>R</kbd> or <kbd>Enter</kbd> (or tap the board) to restart.</div>
         </div>
         <div id="controlsDuo" hidden>
           <div class="ctrl-row"><span class="p1tag">P1</span> <kbd>&larr;</kbd><kbd>&rarr;</kbd> move <kbd>&darr;</kbd> soft drop <kbd>Space</kbd> hard drop</div>
@@ -167,27 +211,27 @@
         </div>
       </div>
       <div class="panel">
-        <h3>How to play</h3>
-        <p id="statusLine">Connecting...</p>
-        <p class="muted" id="modeBlurb"></p>
+        <h2>How to play</h2>
+        <p id="statusLine" role="status">Share your code with a friend — the game starts as soon as they join.</p>
+        <p class="muted" id="modeBlurb">Shared field: one board, pieces pass through each other mid-flight.</p>
       </div>
     </div>
 
     <div class="leaderboard-panel">
       <div class="leaderboard-head">
-        <h3>Leaderboard</h3>
+        <h2>Leaderboard</h2>
         <span class="leaderboard-sub" id="leaderboardSub">Saved locally on this device</span>
         <button type="button" id="clearLeaderboard" class="btn ghost">CLEAR</button>
       </div>
       <table class="leaderboard">
         <thead>
           <tr>
-            <th class="rank">#</th>
-            <th>Name</th>
-            <th class="num">Score</th>
-            <th class="num">Lines</th>
-            <th>Mode</th>
-            <th>When</th>
+            <th class="rank" scope="col">#</th>
+            <th scope="col">Name</th>
+            <th class="num" scope="col">Score</th>
+            <th class="num" scope="col">Lines</th>
+            <th scope="col">Mode</th>
+            <th scope="col">When</th>
           </tr>
         </thead>
         <tbody id="leaderboardBody"></tbody>
@@ -195,49 +239,79 @@
     </div>
 
     <section class="about">
-      <h2>Play Two Player Tetris online — free, no sign-up</h2>
+      <h2>Play Two Player Tetris online — free co-op for two</h2>
       <p>
-        <strong>Two Player Tetris</strong> is a free online multiplayer twist on the classic block
-        puzzle. Create a room, share the four-letter code with a friend, and you're playing in
-        seconds — right in the browser, on desktop or mobile, with nothing to install and no account
-        to make. One piece, two players, cooperate.
+        <strong>Two Player Tetris</strong> is a free, browser-based block-stacking puzzle built for two
+        people working together. Instead of racing each other on separate boards, you and a friend
+        share <strong>one board and one team score</strong>. Create a room, send the 4-character code, and
+        the game starts the moment your friend joins — no download, no account, nothing to install.
+      </p>
+      <p>
+        It plays like the classic falling-blocks puzzle you already know — 7-bag randomizer, ghost
+        piece, a three-piece preview and one hold per piece — but every mode is designed around
+        coordination: sharing space, splitting the controls, or taking turns. It's a quick 2 player
+        game for a video call, a long-distance friend or a lunch break.
       </p>
 
-      <h3>Six ways to play together</h3>
+      <h3>Six co-op modes</h3>
       <ul class="mode-list">
-        <li><strong>Shared field</strong> — both players control the same falling piece on one board. Pure co-op coordination.</li>
-        <li><strong>Split field</strong> — you each get your own board side by side and race to the highest score.</li>
-        <li><strong>Garbage Survival</strong> — clearing lines sends garbage rows to your opponent. Last one standing wins.</li>
-        <li><strong>Relay</strong> — players take turns steering the piece, handing off control on a timer.</li>
-        <li><strong>Duo Controls</strong> — one board, but each player owns half the controls (one moves, one rotates).</li>
-        <li><strong>Architect</strong> — one player places the pieces while the other builds the plan.</li>
+        <li><strong>Shared field</strong> — one 10-wide board, and you each drop your own pieces at the same time. Falling pieces pass through each other, then lock onto the same stack. Agree on who builds which side.</li>
+        <li><strong>Split field</strong> — the board is divided down the middle: Player 1 stacks in the left five columns, Player 2 in the right five. A row only clears when both halves are full, so you have to keep pace with each other.</li>
+        <li><strong>Garbage Survival</strong> — every 10 seconds a garbage row with a single gap rises from the bottom. Clear lines together faster than the garbage piles up; if the stack reaches the top, the round is over.</li>
+        <li><strong>Relay</strong> — one piece at a time, and control passes to your partner after every piece locks. Leave them a good spot for the next piece.</li>
+        <li><strong>Duo Controls</strong> — one shared piece with split controls: Player 1 moves it and hard-drops, Player 2 rotates and holds, and both can soft-drop. Talk constantly.</li>
+        <li><strong>Architect</strong> — the relaxed mode. Fill the dashed target shape together — ten targets, from a tiny block to a smiley face — for a bonus each time you complete one.</li>
       </ul>
 
       <h3>How to play with a friend</h3>
       <ol class="how-list">
-        <li>Click <strong>NEW ROOM</strong> to generate your room code.</li>
-        <li>Send the code to a friend, or have them enter it under <strong>ENTER CODE</strong> and hit <strong>JOIN</strong>.</li>
-        <li>Pick a mode and start stacking. Use <kbd>&larr;</kbd> <kbd>&rarr;</kbd> to move, <kbd>&uarr;</kbd> to rotate, <kbd>Space</kbd> to hard drop, and <kbd>C</kbd> to hold. WASD works too.</li>
+        <li>Open the page — you get your own room code at the top automatically. Click <strong>NEW ROOM</strong> any time for a fresh one.</li>
+        <li>Send the code to your friend. They type it under <strong>ENTER CODE</strong> and press <strong>JOIN</strong>. Each room holds exactly two players.</li>
+        <li>The game starts as soon as the second player joins. Either player can switch modes at any time, which restarts the round.</li>
+        <li>Move with <kbd>&larr;</kbd> <kbd>&rarr;</kbd>, rotate with <kbd>&uarr;</kbd>, soft drop with <kbd>&darr;</kbd>, hard drop with <kbd>Space</kbd> and hold with <kbd>C</kbd>. WASD works too, and phones and tablets get on-screen buttons.</li>
       </ol>
+      <p>Want the full rules and strategy for each mode? Read the <a href="/how-to-play">how-to-play guide</a>.</p>
+
+      <h3>Scoring</h3>
+      <p>
+        Clearing 1, 2, 3 or 4 lines at once scores 100, 300, 500 or 800 points, multiplied by the
+        current level. The level goes up every 10 lines and the pieces fall faster each time. Points go
+        to the shared team score and to the player who placed the piece. In Architect, finishing a target
+        shape adds a bonus of 500 × the Architect level. Your best scores are kept in the leaderboard on
+        your device.
+      </p>
 
       <h3>Frequently asked questions</h3>
       <dl class="faq">
         <dt>Is Two Player Tetris free?</dt>
-        <dd>Yes — it's completely free to play, with no ads to start a game and no payment required.</dd>
+        <dd>Yes. It's completely free to play, with no ads and no payments.</dd>
 
         <dt>Do I need to create an account?</dt>
-        <dd>No sign-up needed. Just open the page, create a room, and share the code.</dd>
+        <dd>No sign-up needed. Open the page, share your room code, and play.</dd>
 
         <dt>How do I invite a friend?</dt>
-        <dd>Click NEW ROOM, then send your friend the four-letter code shown at the top. They enter it and join your game instantly.</dd>
+        <dd>Send them the 4-character code shown under YOUR CODE. They enter it, press JOIN, and the game starts right away.</dd>
+
+        <dt>Is it co-op or competitive?</dt>
+        <dd>All six modes are cooperative: you play on one board, chase one team score, and win or lose together.</dd>
 
         <dt>Can I play two-player Tetris on mobile?</dt>
-        <dd>Yes. It runs in any modern mobile or desktop browser — no app or download required.</dd>
+        <dd>Yes. It runs in any modern mobile browser, and phones and tablets get on-screen buttons for move, rotate, soft drop, hard drop and hold. A keyboard is still the quickest way to play.</dd>
 
-        <dt>Can I play co-op and competitive modes?</dt>
-        <dd>Both. Shared field, Relay, Duo Controls and Architect are cooperative, while Split field and Garbage Survival are competitive.</dd>
+        <dt>Can we play on the same computer?</dt>
+        <dd>Each player joins from their own device and browser, so you can play in the same room or across the world. Every room holds exactly two players.</dd>
+
+        <dt>What happens if my friend disconnects?</dt>
+        <dd>The round stops and the board resets. When they rejoin with the same code — or someone new joins — a fresh game starts.</dd>
       </dl>
     </section>
+
+    <footer class="site-footer">
+      <a href="/how-to-play">How to play</a>
+      <a href="/about">About</a>
+      <a href="/feedback">Feedback</a>
+      <a href="/privacy">Privacy</a>
+    </footer>
   </div>
   <script type="module" src="/client.js"></script>
 </body>

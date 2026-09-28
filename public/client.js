@@ -27,6 +27,13 @@ const COLOR_PRESETS = [
   '#c77dff', '#ff9f43', '#5c7aff', '#f8f8f8',
 ];
 
+const COLOR_NAMES = {
+  '#4ccfff': 'Cyan', '#ff4d6d': 'Pink', '#ffd93d': 'Yellow', '#7ae582': 'Green',
+  '#c77dff': 'Purple', '#ff9f43': 'Orange', '#5c7aff': 'Blue', '#f8f8f8': 'White',
+};
+
+const isTouchDevice = matchMedia('(pointer: coarse)').matches;
+
 function playerColor(slot) {
   const stored = state?.players?.[slot]?.color;
   if (stored) return stored;
@@ -66,6 +73,7 @@ let myPredicted = null;
 let inputSeq = 0;
 let lastSentSeq = 0;
 let lastWasGameOver = false;
+let lastWasRunning = false;
 let pendingDrop = false;
 let pendingDropTimer = null;
 let localHoldUsed = false;
@@ -134,7 +142,9 @@ function buildColorSwatches() {
     btn.className = 'color-swatch';
     btn.style.background = c;
     btn.dataset.color = c;
-    btn.title = c;
+    btn.title = COLOR_NAMES[c] || c;
+    btn.setAttribute('aria-label', `${COLOR_NAMES[c] || c} pieces`);
+    btn.setAttribute('aria-pressed', String(c === chosenColor));
     if (c === chosenColor) btn.classList.add('selected');
     btn.addEventListener('click', () => pickColor(c));
     colorSwatchesEl.appendChild(btn);
@@ -146,6 +156,7 @@ function pickColor(c) {
   localStorage.setItem('tetrisPlayerColor', c);
   for (const el of colorSwatchesEl.querySelectorAll('.color-swatch')) {
     el.classList.toggle('selected', el.dataset.color === c);
+    el.setAttribute('aria-pressed', String(el.dataset.color === c));
   }
   send({ type: 'setColor', color: c });
 }
@@ -198,6 +209,12 @@ ws.addEventListener('message', (e) => {
       lastSavedKey = null;
     }
     lastWasGameOver = !!state.gameOver;
+    // On phones the controls sit above the board; bring the play area into view
+    // when a round starts.
+    if (isTouchDevice && state.running && !lastWasRunning) {
+      document.querySelector('.topstats')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    lastWasRunning = !!state.running;
     reconcileMyPiece();
     setupLocalGravity();
     resolveLocalOverlapIfNeeded();
@@ -216,13 +233,13 @@ function applyModeLayout(mode) {
   setCanvasSize(canvas1, BLOCK);
 
   [modeSharedBtn, modeSplitBtn, modeGarbageBtn, modeRelayBtn, modeDuoBtn, modeArchitectBtn]
-    .forEach(b => b && b.classList.remove('active'));
+    .forEach(b => { if (b) { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); } });
   const activeBtn = {
     shared: modeSharedBtn, split: modeSplitBtn,
     garbage: modeGarbageBtn, relay: modeRelayBtn,
     duo: modeDuoBtn, architect: modeArchitectBtn,
   }[mode];
-  if (activeBtn) activeBtn.classList.add('active');
+  if (activeBtn) { activeBtn.classList.add('active'); activeBtn.setAttribute('aria-pressed', 'true'); }
 
   controlsDefaultEl.hidden = mode === 'duo';
   controlsDuoEl.hidden = mode !== 'duo';
@@ -551,6 +568,46 @@ document.addEventListener('keyup', (e) => {
 
 window.addEventListener('blur', stopAllRepeats);
 
+// On-screen buttons for phones and tablets. Move and soft drop auto-repeat while
+// held, like the arrow keys.
+const touchControlsEl = document.getElementById('touchControls');
+const TOUCH_REPEAT = { left: ['tL', false], right: ['tR', false], down: ['tD', true] };
+
+function showTouchControls() {
+  if (touchControlsEl) touchControlsEl.hidden = false;
+}
+
+if (touchControlsEl) {
+  if (isTouchDevice) showTouchControls();
+  window.addEventListener('touchstart', showTouchControls, { once: true, passive: true });
+
+  for (const btn of touchControlsEl.querySelectorAll('.touch-btn')) {
+    const action = btn.dataset.action;
+    const repeat = TOUCH_REPEAT[action];
+    const release = () => {
+      btn.classList.remove('pressed');
+      if (repeat) stopRepeat(repeat[0]);
+    };
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      btn.setPointerCapture?.(e.pointerId);
+      btn.classList.add('pressed');
+      if (state?.gameOver) { send({ type: 'restart' }); return; }
+      if (mySlot < 0) return;
+      if (repeat) startRepeat(repeat[0], action, repeat[1]);
+      else doMove(action);
+    });
+    btn.addEventListener('pointerup', release);
+    btn.addEventListener('pointercancel', release);
+    btn.addEventListener('lostpointercapture', release);
+    btn.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+}
+
+canvas1.addEventListener('pointerdown', () => {
+  if (state?.gameOver) send({ type: 'restart' });
+});
+
 let renderScheduled = false;
 function scheduleRender() {
   if (renderScheduled) return;
@@ -646,7 +703,9 @@ function render() {
     scheduleRender();
   }
 
-  if (state.gameOver) overlayOn(ctx, c, 'GAME OVER', 'Press R or Enter to restart');
+  if (state.gameOver) {
+    overlayOn(ctx, c, 'GAME OVER', isTouchDevice ? 'Tap to restart' : 'Press R or Enter to restart');
+  }
   else if (!state.running && state.playerCount < 2) {
     overlayOn(ctx, c, `Share code: ${myCode}`, 'Waiting for player 2…');
   }
@@ -890,7 +949,9 @@ function updateHUD() {
   else if (mySlot === 1) parts.push('You are Player 2 (pink).');
   if (state?.playerCount === 1) parts.push(`Share code ${myCode} to start.`);
   else if (state?.playerCount === 2 && state?.running) parts.push('Playing.');
-  else if (state?.gameOver) parts.push('Game over — press R or Enter to restart.');
+  else if (state?.gameOver) {
+    parts.push(isTouchDevice ? 'Game over — tap the board to restart.' : 'Game over — press R or Enter to restart.');
+  }
   setStatus(parts.join(' '));
 }
 

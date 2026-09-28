@@ -2,6 +2,9 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import url from 'url';
+import zlib from 'zlib';
+import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 import { WebSocketServer } from 'ws';
 import {
   COLS, ROWS, COLOR_INDEX, TYPES,
@@ -24,34 +27,292 @@ function logErr(...args) {
   console.error(new Date().toISOString(), 'ERR', ...args);
 }
 
+const PUBLIC_DIR = path.join(__dirname, 'public');
+const CANONICAL_ORIGIN = process.env.CANONICAL_ORIGIN || 'https://twoplayertetris.com';
+const CANONICAL_HOST = new URL(CANONICAL_ORIGIN).host;
+// Alternate hostnames that serve the same app; 301 them to the canonical origin.
+const REDIRECT_HOSTS = new Set([`www.${CANONICAL_HOST}`, 'twoplayertetris.fly.dev']);
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js':   'application/javascript; charset=utf-8',
   '.css':  'text/css; charset=utf-8',
   '.ico':  'image/x-icon',
+  '.svg':  'image/svg+xml',
+  '.png':  'image/png',
+  '.xml':  'application/xml; charset=utf-8',
+  '.txt':  'text/plain; charset=utf-8',
+};
+const COMPRESSIBLE = new Set(['.html', '.js', '.css', '.ico', '.svg', '.xml', '.txt']);
+
+// If the game is ever listed on a portal that iframes it (itch.io, CrazyGames...),
+// add that origin to frame-ancestors.
+const SECURITY_HEADERS = {
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'SAMEORIGIN',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+  'Content-Security-Policy': [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self' data:",
+    "connect-src 'self' ws: wss:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'self'",
+  ].join('; '),
 };
 
-const server = http.createServer((req, res) => {
-  const urlPath = req.url === '/' ? '/index.html' : req.url.split('?')[0];
-  const filePath = path.join(__dirname, 'public', urlPath);
-  const ip = req.headers['fly-client-ip'] || req.socket.remoteAddress || '?';
-  if (!filePath.startsWith(path.join(__dirname, 'public'))) {
-    logLine(`http 403 ${req.method} ${urlPath} ip=${ip}`);
-    res.writeHead(403); res.end('Forbidden'); return;
+// Referenced as ?v=<hash> so browsers can cache them for a year; the hash changes
+// whenever the file does. Dependencies first (client.js imports shared.js).
+const VERSIONED = ['shared.js', 'style.css', 'client.js'];
+// Served only as the 404 body, never at its own URL.
+const HIDDEN_FILES = new Set(['404.html']);
+
+function loadAssets() {
+  const raw = new Map();
+  for (const name of fs.readdirSync(PUBLIC_DIR)) {
+    const full = path.join(PUBLIC_DIR, name);
+    if (fs.statSync(full).isFile()) raw.set(name, fs.readFileSync(full));
   }
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
-      logLine(`http 404 ${req.method} ${urlPath} ip=${ip}`);
-      res.writeHead(404); res.end('Not found'); return;
+
+  const versions = {};
+  const addVersions = (name, buf) => {
+    if (!['.html', '.js', '.css'].includes(path.extname(name))) return buf;
+    let text = buf.toString('utf8');
+    for (const [dep, v] of Object.entries(versions)) {
+      const re = new RegExp(`(["'])(\\.?/)${dep.replace(/\./g, '\\.')}\\1`, 'g');
+      text = text.replace(re, `$1$2${dep}?v=${v}$1`);
     }
-    const ext = path.extname(filePath);
-    res.writeHead(200, {
-      'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Cache-Control': 'no-cache',
+    return Buffer.from(text);
+  };
+
+  const assets = new Map();
+  const add = (name) => {
+    const body = addVersions(name, raw.get(name));
+    const ext = path.extname(name);
+    const hash = crypto.createHash('sha256').update(body).digest('hex').slice(0, 12);
+    const asset = { name, ext, body, hash, etag: `W/"${hash}"`, type: MIME[ext] || 'application/octet-stream' };
+    if (COMPRESSIBLE.has(ext) && body.length > 512) {
+      asset.br = zlib.brotliCompressSync(body, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 } });
+      asset.gzip = zlib.gzipSync(body, { level: 9 });
+    }
+    assets.set(name, asset);
+    return asset;
+  };
+  for (const name of VERSIONED) if (raw.has(name)) versions[name] = add(name).hash;
+  for (const name of raw.keys()) if (!assets.has(name)) add(name);
+  return assets;
+}
+
+const assets = loadAssets();
+
+function cacheControlFor(asset, query) {
+  if (query.has('v')) {
+    return query.get('v') === asset.hash ? 'public, max-age=31536000, immutable' : 'no-cache';
+  }
+  // Unversioned code and text revalidate via ETag so a deploy is picked up at once.
+  if (['.html', '.js', '.css', '.xml', '.txt'].includes(asset.ext)) return 'no-cache';
+  return 'public, max-age=86400';
+}
+
+// Returns { asset } to serve, { redirect } to 301 to, or null for a 404.
+function resolvePath(pathname) {
+  if (pathname === '/') return { asset: assets.get('index.html') };
+  if (pathname.length > 1 && pathname.endsWith('/')) return { redirect: pathname.replace(/\/+$/, '') || '/' };
+
+  const name = pathname.slice(1);
+  if (HIDDEN_FILES.has(name) || HIDDEN_FILES.has(`${name}.html`)) return null;
+  if (name.endsWith('.html') && assets.has(name)) {
+    return { redirect: name === 'index.html' ? '/' : `/${name.slice(0, -5)}` };
+  }
+  if (!path.extname(name) && assets.has(`${name}.html`)) return { asset: assets.get(`${name}.html`) };
+  if (assets.has(name) && !name.endsWith('.html')) return { asset: assets.get(name) };
+  return null;
+}
+
+function sendAsset(req, res, asset, query, status = 200) {
+  const headers = {
+    ...SECURITY_HEADERS,
+    'Content-Type': asset.type,
+    'Cache-Control': status === 200 ? cacheControlFor(asset, query) : 'no-cache',
+    'Vary': 'Accept-Encoding',
+  };
+  if (status === 200) {
+    headers.ETag = asset.etag;
+    if (req.headers['if-none-match'] === asset.etag) {
+      res.writeHead(304, headers);
+      res.end();
+      return 304;
+    }
+  }
+  let body = asset.body;
+  const accept = req.headers['accept-encoding'] || '';
+  if (asset.br && /\bbr\b/.test(accept)) { body = asset.br; headers['Content-Encoding'] = 'br'; }
+  else if (asset.gzip && /\bgzip\b/.test(accept)) { body = asset.gzip; headers['Content-Encoding'] = 'gzip'; }
+  headers['Content-Length'] = body.length;
+  res.writeHead(status, headers);
+  res.end(req.method === 'HEAD' ? undefined : body);
+  return status;
+}
+
+function sendRedirect(res, location) {
+  res.writeHead(301, { ...SECURITY_HEADERS, Location: location, 'Cache-Control': 'public, max-age=3600' });
+  res.end();
+}
+
+function sendNotFound(req, res) {
+  const page = assets.get('404.html');
+  if (page) return sendAsset(req, res, page, new URLSearchParams(), 404);
+  res.writeHead(404, { ...SECURITY_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end('Not found');
+  return 404;
+}
+
+// ---- Feedback form -> email ------------------------------------------------
+// The recipient lives only in the FEEDBACK_TO secret so it never appears in the
+// page or this (public) repo. Without SMTP settings, feedback is written to the
+// server log instead of being emailed.
+const FEEDBACK_TO = process.env.FEEDBACK_TO || '';
+const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
+const mailer = FEEDBACK_TO && process.env.SMTP_USER && process.env.SMTP_PASS
+  ? nodemailer.createTransport({
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: SMTP_PORT,
+      secure: SMTP_PORT === 465,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    })
+  : null;
+
+const FEEDBACK_MAX_BYTES = 16 * 1024;
+const FEEDBACK_WINDOW_MS = 60 * 60 * 1000;
+const FEEDBACK_MAX_PER_WINDOW = 5;
+const feedbackHits = new Map();
+
+function feedbackRateLimited(ip) {
+  const now = Date.now();
+  const recent = (feedbackHits.get(ip) || []).filter(t => now - t < FEEDBACK_WINDOW_MS);
+  if (recent.length >= FEEDBACK_MAX_PER_WINDOW) { feedbackHits.set(ip, recent); return true; }
+  recent.push(now);
+  feedbackHits.set(ip, recent);
+  return false;
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, hits] of feedbackHits) {
+    if (hits.every(t => now - t >= FEEDBACK_WINDOW_MS)) feedbackHits.delete(ip);
+  }
+}, FEEDBACK_WINDOW_MS).unref();
+
+function readBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) {
+        req.removeAllListeners('data');
+        req.resume();
+        reject(Object.assign(new Error('too large'), { tooLarge: true }));
+        return;
+      }
+      chunks.push(c);
     });
-    res.end(data);
-    logLine(`http 200 ${req.method} ${urlPath} ip=${ip} ua="${(req.headers['user-agent']||'').slice(0,60)}"`);
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
   });
+}
+
+const oneLine = (s, max) => String(s ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, max);
+
+async function handleFeedback(req, res, ip) {
+  const isForm = (req.headers['content-type'] || '').startsWith('application/x-www-form-urlencoded');
+  const reply = (status, error) => {
+    if (isForm) {
+      res.writeHead(303, { ...SECURITY_HEADERS, Location: error ? '/feedback?error=1' : '/feedback-sent' });
+      res.end();
+    } else {
+      res.writeHead(status, { ...SECURITY_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(error ? { ok: false, error } : { ok: true }));
+    }
+  };
+
+  let fields;
+  try {
+    const body = await readBody(req, FEEDBACK_MAX_BYTES);
+    fields = isForm ? Object.fromEntries(new URLSearchParams(body)) : JSON.parse(body);
+  } catch (err) {
+    if (err?.tooLarge) return reply(413, 'Your message is too long.');
+    return reply(400, 'Could not read your message.');
+  }
+
+  // Honeypot: a field real visitors never see. Pretend success so bots move on.
+  if (fields.website) { logLine(`feedback honeypot ip=${ip}`); return reply(200); }
+
+  const message = String(fields.message ?? '').trim().slice(0, 4000);
+  const name = oneLine(fields.name, 60);
+  let email = oneLine(fields.email, 200);
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) email = '';
+  if (message.length < 3) return reply(400, 'Please write a message.');
+  if (feedbackRateLimited(ip)) return reply(429, 'Too many messages — please try again later.');
+
+  const ua = oneLine(req.headers['user-agent'], 200);
+  if (!mailer) {
+    logLine(`feedback (email not configured) name="${name}" email="${email}" message=${JSON.stringify(message)}`);
+    return reply(200);
+  }
+  try {
+    await mailer.sendMail({
+      from: { name: 'Two Player Tetris feedback', address: process.env.SMTP_USER },
+      to: FEEDBACK_TO,
+      replyTo: email || undefined,
+      subject: `Feedback: ${oneLine(message, 60)}`,
+      text: `${message}\n\n---\nName: ${name || '(not given)'}\nReply-to: ${email || '(not given)'}\nBrowser: ${ua}\nSent: ${new Date().toISOString()}`,
+    });
+    logLine(`feedback emailed ip=${ip} chars=${message.length}`);
+    return reply(200);
+  } catch (err) {
+    logErr(`feedback email failed: ${err?.message || err} message=${JSON.stringify(message)}`);
+    return reply(502, 'Sorry, your message could not be sent. Please try again later.');
+  }
+}
+
+const server = http.createServer((req, res) => {
+  const ip = req.headers['fly-client-ip'] || req.socket.remoteAddress || '?';
+  const host = (req.headers.host || '').toLowerCase().replace(/:\d+$/, '');
+  if (REDIRECT_HOSTS.has(host)) {
+    sendRedirect(res, `${CANONICAL_ORIGIN}${req.url}`);
+    logLine(`http 301 ${req.method} ${host}${req.url} -> canonical ip=${ip}`);
+    return;
+  }
+
+  let parsed;
+  try { parsed = new URL(req.url, CANONICAL_ORIGIN); }
+  catch { res.writeHead(400, SECURITY_HEADERS); res.end(); return; }
+  const { pathname, searchParams, search } = parsed;
+
+  if (req.method === 'POST' && pathname === '/api/feedback') {
+    handleFeedback(req, res, ip).catch((err) => {
+      logErr(`feedback handler: ${err?.message || err}`);
+      if (!res.headersSent) { res.writeHead(500, SECURITY_HEADERS); res.end(); }
+    });
+    return;
+  }
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { ...SECURITY_HEADERS, Allow: 'GET, HEAD' });
+    res.end();
+    return;
+  }
+
+  const route = resolvePath(pathname);
+  let status;
+  if (route?.redirect) { sendRedirect(res, route.redirect + search); status = 301; }
+  else if (route?.asset) status = sendAsset(req, res, route.asset, searchParams);
+  else status = sendNotFound(req, res);
+  logLine(`http ${status} ${req.method} ${pathname} ip=${ip} ua="${(req.headers['user-agent']||'').slice(0,60)}"`);
 });
 
 const wss = new WebSocketServer({ server });

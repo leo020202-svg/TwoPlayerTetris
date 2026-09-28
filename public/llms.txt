@@ -1,0 +1,24 @@
+# Two Player Tetris
+
+> Free browser-based co-op block-stacking puzzle for exactly two players. Both players share one 10x20 board and one team score. Create a room, share the 4-character code, and the game starts when your friend joins — no sign-up, no install, no ads.
+
+## Pages
+- [Play](https://twoplayertetris.com/): the game, mode overview and FAQ
+- [How to play](https://twoplayertetris.com/how-to-play): rules, controls, scoring and strategy for every mode
+- [About](https://twoplayertetris.com/about): who makes it and how it works
+- [Privacy](https://twoplayertetris.com/privacy): what data the game handles
+
+## Modes (all cooperative)
+- Shared field: one board; both players drop their own pieces at once, and falling pieces pass through each other
+- Split field: the board is divided down the middle; each player owns 5 columns and rows clear only when both halves are full
+- Garbage Survival: a garbage row with one gap rises every 10 seconds; clear lines together to keep the stack down
+- Relay: one piece at a time; control passes to the other player after every piece locks
+- Duo Controls: one shared piece; Player 1 moves and hard-drops, Player 2 rotates and holds, both can soft-drop
+- Architect: fill a dashed target shape together; ten targets, with a bonus for each one completed
+
+## Facts
+- Players: exactly 2 per room
+- Price: free, no ads, no account
+- Platforms: any modern browser; keyboard controls on desktop, on-screen buttons on phones and tablets
+- Rules: 7-bag randomizer, ghost piece, 3-piece preview, one hold per piece
+- Scoring: 100/300/500/800 points for 1-4 lines, multiplied by level; level rises every 10 lines

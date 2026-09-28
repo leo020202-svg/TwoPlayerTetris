@@ -1,4 +1,6 @@
 User-agent: *
 Allow: /
+Disallow: /api/
+Disallow: /feedback-sent
 
 Sitemap: https://twoplayertetris.com/sitemap.xml

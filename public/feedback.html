@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Feedback — Two Player Tetris</title>
+  <meta name="description" content="Report a bug, suggest a new co-op mode or send a message to the developer of Two Player Tetris." />
+  <link rel="canonical" href="https://twoplayertetris.com/feedback" />
+  <meta name="theme-color" content="#05080f" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="alternate icon" href="/favicon.ico" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="site-header">
+      <a class="brand" href="/">Two Player Tetris</a>
+      <p class="tagline">One board. Two players. Cooperate.</p>
+    </header>
+
+    <main class="doc">
+      <article class="about">
+        <h1>Send feedback</h1>
+        <p>
+          Found a bug, have an idea for a new mode, or want to say what you liked? Write it below and it
+          goes straight to the developer. Leave an email if you'd like a reply.
+        </p>
+
+        <form class="feedback-form" id="feedbackForm" method="post" action="/api/feedback">
+          <label>Message
+            <textarea name="message" required minlength="3" maxlength="4000"></textarea>
+          </label>
+          <label>Your name <span class="optional">(optional)</span>
+            <input name="name" maxlength="60" autocomplete="name" />
+          </label>
+          <label>Your email <span class="optional">(optional — only if you want a reply)</span>
+            <input name="email" type="email" maxlength="200" autocomplete="email" />
+          </label>
+          <div class="hp" aria-hidden="true">
+            <label>Website <input name="website" tabindex="-1" autocomplete="off" /></label>
+          </div>
+          <button type="submit" class="btn primary">SEND</button>
+          <p class="form-status" id="feedbackStatus" role="status"></p>
+        </form>
+
+        <p>Your message is handled as described in the <a href="/privacy">privacy policy</a>.</p>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <a href="/">Play</a>
+      <a href="/how-to-play">How to play</a>
+      <a href="/about">About</a>
+      <a href="/privacy">Privacy</a>
+    </footer>
+  </div>
+  <script type="module" src="/feedback.js"></script>
+</body>
+</html>
