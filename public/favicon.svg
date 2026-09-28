@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="12" fill="#0c1325"/>
+  <!-- two interlocking pieces: cooperation -->
+  <g>
+    <!-- cyan piece (player 1) -->
+    <rect x="10" y="14" width="14" height="14" rx="2" fill="#3bd6ff"/>
+    <rect x="24" y="14" width="14" height="14" rx="2" fill="#3bd6ff"/>
+    <rect x="10" y="28" width="14" height="14" rx="2" fill="#3bd6ff"/>
+    <!-- magenta piece (player 2) -->
+    <rect x="38" y="22" width="14" height="14" rx="2" fill="#ff5cc8"/>
+    <rect x="38" y="36" width="14" height="14" rx="2" fill="#ff5cc8"/>
+    <rect x="24" y="36" width="14" height="14" rx="2" fill="#ff5cc8"/>
+  </g>
+</svg>

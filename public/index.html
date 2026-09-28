@@ -3,11 +3,49 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Co-op Tetris</title>
+
+  <title>Two Player Tetris — Play Co-op Tetris Online With a Friend</title>
+  <meta name="description" content="Play two-player Tetris online for free. Share one piece or race on split fields — create a room, send the code, and play co-op Tetris with a friend in seconds. No sign-up." />
+  <link rel="canonical" href="https://twoplayertetris.com/" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://twoplayertetris.com/" />
+  <meta property="og:title" content="Two Player Tetris — Play Co-op Tetris Online With a Friend" />
+  <meta property="og:description" content="One piece. Two players. Cooperate. Create a room, share the code, and play Tetris together — free, no sign-up." />
+  <meta property="og:image" content="https://twoplayertetris.com/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Two Player Tetris — Play Co-op Tetris Online" />
+  <meta name="twitter:description" content="One piece. Two players. Cooperate. Free online co-op Tetris — just share a room code." />
+  <meta name="twitter:image" content="https://twoplayertetris.com/og-image.png" />
+
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="alternate icon" href="/favicon.ico" />
   <link rel="stylesheet" href="/style.css" />
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "VideoGame",
+    "name": "Two Player Tetris",
+    "url": "https://twoplayertetris.com/",
+    "description": "Free online co-op and competitive two-player Tetris. Share one piece or play split fields across six modes — create a room and share the code to play with a friend.",
+    "genre": ["Puzzle", "Multiplayer"],
+    "gamePlatform": "Web Browser",
+    "applicationCategory": "Game",
+    "playMode": ["CoOp", "MultiPlayer"],
+    "operatingSystem": "Any (web browser)",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+  }
+  </script>
 </head>
 <body>
   <div class="page">
+    <h1 class="visually-hidden">Two Player Tetris — Play Co-op Tetris Online With a Friend</h1>
     <div class="room-bar">
       <div class="room-code-group">
         <span class="room-label">YOUR CODE</span>
@@ -155,6 +193,51 @@
         <tbody id="leaderboardBody"></tbody>
       </table>
     </div>
+
+    <section class="about">
+      <h2>Play Two Player Tetris online — free, no sign-up</h2>
+      <p>
+        <strong>Two Player Tetris</strong> is a free online multiplayer twist on the classic block
+        puzzle. Create a room, share the four-letter code with a friend, and you're playing in
+        seconds — right in the browser, on desktop or mobile, with nothing to install and no account
+        to make. One piece, two players, cooperate.
+      </p>
+
+      <h3>Six ways to play together</h3>
+      <ul class="mode-list">
+        <li><strong>Shared field</strong> — both players control the same falling piece on one board. Pure co-op coordination.</li>
+        <li><strong>Split field</strong> — you each get your own board side by side and race to the highest score.</li>
+        <li><strong>Garbage Survival</strong> — clearing lines sends garbage rows to your opponent. Last one standing wins.</li>
+        <li><strong>Relay</strong> — players take turns steering the piece, handing off control on a timer.</li>
+        <li><strong>Duo Controls</strong> — one board, but each player owns half the controls (one moves, one rotates).</li>
+        <li><strong>Architect</strong> — one player places the pieces while the other builds the plan.</li>
+      </ul>
+
+      <h3>How to play with a friend</h3>
+      <ol class="how-list">
+        <li>Click <strong>NEW ROOM</strong> to generate your room code.</li>
+        <li>Send the code to a friend, or have them enter it under <strong>ENTER CODE</strong> and hit <strong>JOIN</strong>.</li>
+        <li>Pick a mode and start stacking. Use <kbd>&larr;</kbd> <kbd>&rarr;</kbd> to move, <kbd>&uarr;</kbd> to rotate, <kbd>Space</kbd> to hard drop, and <kbd>C</kbd> to hold. WASD works too.</li>
+      </ol>
+
+      <h3>Frequently asked questions</h3>
+      <dl class="faq">
+        <dt>Is Two Player Tetris free?</dt>
+        <dd>Yes — it's completely free to play, with no ads to start a game and no payment required.</dd>
+
+        <dt>Do I need to create an account?</dt>
+        <dd>No sign-up needed. Just open the page, create a room, and share the code.</dd>
+
+        <dt>How do I invite a friend?</dt>
+        <dd>Click NEW ROOM, then send your friend the four-letter code shown at the top. They enter it and join your game instantly.</dd>
+
+        <dt>Can I play two-player Tetris on mobile?</dt>
+        <dd>Yes. It runs in any modern mobile or desktop browser — no app or download required.</dd>
+
+        <dt>Can I play co-op and competitive modes?</dt>
+        <dd>Both. Shared field, Relay, Duo Controls and Architect are cooperative, while Split field and Garbage Survival are competitive.</dd>
+      </dl>
+    </section>
   </div>
   <script type="module" src="/client.js"></script>
 </body>

@@ -433,6 +433,86 @@ html, body {
   image-rendering: pixelated;
 }
 
+/* Accessible / crawlable but visually hidden (SEO heading) */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Descriptive content / FAQ block for SEO + AI search */
+.about {
+  margin-top: 8px;
+  padding: 22px 24px;
+  background: #0e1628;
+  border: 1px solid #1b2747;
+  border-radius: 10px;
+  line-height: 1.6;
+  color: #c3cbe6;
+}
+
+.about h2 {
+  margin: 0 0 12px;
+  font-size: 22px;
+  color: #e6e9f2;
+}
+
+.about h3 {
+  margin: 22px 0 8px;
+  font-size: 16px;
+  letter-spacing: 0.02em;
+  color: #e6e9f2;
+}
+
+.about p { margin: 0 0 12px; max-width: 70ch; }
+
+.about a { color: #3bd6ff; }
+
+.mode-list,
+.how-list {
+  margin: 0 0 8px;
+  padding-left: 20px;
+  max-width: 70ch;
+}
+
+.mode-list li,
+.how-list li { margin-bottom: 6px; }
+
+.about strong { color: #e6e9f2; }
+
+.faq { margin: 0; max-width: 70ch; }
+
+.faq dt {
+  margin-top: 14px;
+  font-weight: 700;
+  color: #e6e9f2;
+}
+
+.faq dd {
+  margin: 4px 0 0;
+  color: #9aa6cc;
+}
+
+.about kbd {
+  display: inline-block;
+  min-width: 16px;
+  padding: 1px 6px;
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+  text-align: center;
+  color: #cdd6f4;
+  background: #161f38;
+  border: 1px solid #2a385e;
+  border-radius: 4px;
+}
+
 .next-queue { display: flex; flex-direction: column; gap: 8px; }
 
 .bottom {
