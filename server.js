@@ -78,7 +78,7 @@ const SECURITY_HEADERS = {
 
 // Referenced as ?v=<hash> so browsers can cache them for a year; the hash changes
 // whenever the file does. Dependencies first (client.js imports shared.js).
-const VERSIONED = ['shared.js', 'style.css', 'client.js'];
+const VERSIONED = ['page.js', 'shared.js', 'style.css', 'client.js'];
 // Served only as the 404 body, never at its own URL.
 const HIDDEN_FILES = new Set(['404.html']);
 
@@ -255,6 +255,25 @@ function readBody(req, limit) {
 
 const oneLine = (s, max) => String(s ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, max);
 
+// A page view reported by the page itself (public/page.js). Bots that only
+// download the HTML never send this, so it's what the internal stats count.
+async function handlePageBeacon(req, res, ip) {
+  let data = null;
+  try { data = JSON.parse(await readBody(req, 2048)); } catch {}
+  const page = typeof data?.p === 'string' && data.p.startsWith('/') && data.p.length <= 100 ? data.p : '';
+  const route = page ? resolvePath(page) : null;
+  if (route?.asset?.ext === '.html') {
+    stats.pageBeacon(req, ip, {
+      path: page,
+      referrer: typeof data.r === 'string' ? data.r.slice(0, 500) : '',
+      query: new URLSearchParams(typeof data.s === 'string' ? data.s.slice(0, 500) : ''),
+    });
+  }
+  res.writeHead(204, { ...SECURITY_HEADERS, 'Cache-Control': 'no-store' });
+  res.end();
+  logLine(`http 204 POST /api/page page=${route?.asset ? page : '-'} ip=${ip}`);
+}
+
 async function handleFeedback(req, res, ip) {
   const isForm = (req.headers['content-type'] || '').startsWith('application/x-www-form-urlencoded');
   const reply = (status, error) => {
@@ -321,6 +340,13 @@ const server = http.createServer((req, res) => {
   catch { res.writeHead(400, SECURITY_HEADERS); res.end(); return; }
   const { pathname, searchParams, search } = parsed;
 
+  if (req.method === 'POST' && pathname === '/api/page') {
+    handlePageBeacon(req, res, ip).catch((err) => {
+      logErr(`page beacon: ${err?.message || err}`);
+      if (!res.headersSent) { res.writeHead(500, SECURITY_HEADERS); res.end(); }
+    });
+    return;
+  }
   if (req.method === 'POST' && pathname === '/api/feedback') {
     handleFeedback(req, res, ip).catch((err) => {
       logErr(`feedback handler: ${err?.message || err}`);
@@ -346,7 +372,7 @@ const server = http.createServer((req, res) => {
   if (route?.redirect) { sendRedirect(res, route.redirect + search); status = 301; }
   else if (route?.asset) {
     status = sendAsset(req, res, route.asset, searchParams);
-    if (route.asset.ext === '.html') stats.pageView(req, pathname, searchParams, ip, status);
+    if (route.asset.ext === '.html') stats.htmlRequest(req, status);
   }
   else status = sendNotFound(req, res);
   logLine(`http ${status} ${req.method} ${pathname} ip=${ip} ua="${(req.headers['user-agent']||'').slice(0,60)}"`);

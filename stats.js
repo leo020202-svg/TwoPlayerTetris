@@ -3,6 +3,11 @@
 // The report is served at /stats, and only with the right STATS_KEY (a Fly
 // secret). Without the key the URL is an ordinary 404, so visitors never see it.
 //
+// What counts as a visit: the page's own script (public/page.js) reporting
+// that it ran in a browser. Many bots download the HTML with a browser-like
+// user agent but never run JavaScript, so raw page requests are only kept as a
+// separate "requests" figure.
+//
 // Privacy: no IP addresses or browser strings are stored. Unique visitors are
 // counted with a salted hash, and the salt is replaced every day, so nobody can
 // be followed from one day to the next.
@@ -11,7 +16,8 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 
-const NUM_FIELDS = ['visitors', 'pageViews', 'gameLoads', 'friendsJoined', 'rounds', 'mobile', 'bots'];
+const VERSION = 2;
+const NUM_FIELDS = ['visitors', 'pageViews', 'gameLoads', 'friendsJoined', 'rounds', 'mobile', 'bots', 'requests'];
 const MAX_KEYS = 60; // distinct pages/sources kept per day, so junk referrers can't bloat the file
 const DAY_MS = 86_400_000;
 
@@ -37,7 +43,7 @@ const KNOWN_SOURCES = [
 const today = () => new Date().toISOString().slice(0, 10);
 const daysBack = (n) => Array.from({ length: n }, (_, i) => new Date(Date.now() - i * DAY_MS).toISOString().slice(0, 10));
 const emptyDay = () => ({
-  visitors: 0, pageViews: 0, gameLoads: 0, friendsJoined: 0, rounds: 0, mobile: 0, bots: 0,
+  visitors: 0, pageViews: 0, gameLoads: 0, friendsJoined: 0, rounds: 0, mobile: 0, bots: 0, requests: 0,
   pages: {}, sources: {},
 });
 
@@ -56,17 +62,16 @@ function bump(counts, key) {
 
 // Where a visit came from: utm_source if the link had one, else the referring
 // site. Returns null for clicks between our own pages (not a new arrival).
-function sourceOf(req, query, ownHosts) {
+function sourceOf(referrer, query, ownHosts) {
   const utm = (query.get('utm_source') || '').toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, 40);
   if (utm) return `utm:${utm}`;
-  const ref = req.headers.referer || '';
-  if (!ref) {
+  if (!referrer) {
     if (query.has('fbclid')) return 'facebook';
     if (query.has('gclid')) return 'google ads';
     return '(direct)';
   }
   let host;
-  try { host = new URL(ref).hostname.toLowerCase(); } catch { return '(direct)'; }
+  try { host = new URL(referrer).hostname.toLowerCase(); } catch { return '(direct)'; }
   host = host.replace(/^(www|m|l|lm|out|old)\./, '');
   if (!host) return '(direct)';
   if (ownHosts.has(host)) return null;
@@ -76,7 +81,7 @@ function sourceOf(req, query, ownHosts) {
 
 export function createStats({ file, ownHosts, saveMs = 30_000, keepDays = 400, logErr = console.error }) {
   let dirty = false;
-  const state = load() || { version: 1, since: new Date().toISOString(), days: {}, current: null };
+  const state = load() || { version: VERSION, since: new Date().toISOString(), days: {}, current: null };
   let visitorHashes = new Set(state.current?.date === today() ? state.current.hashes || [] : []);
   rollover();
   setInterval(save, saveMs).unref();
@@ -84,8 +89,11 @@ export function createStats({ file, ownHosts, saveMs = 30_000, keepDays = 400, l
   function load() {
     try {
       const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (saved?.version === 1 && saved.days && typeof saved.since === 'string') return saved;
-      throw new Error('unexpected format');
+      if (saved?.version === VERSION && saved.days && typeof saved.since === 'string') return saved;
+      // Older counting method (raw page requests): start over rather than mix the two.
+      logErr(`stats: ${file} is format v${saved?.version}; starting fresh, old file kept as .v${saved?.version}`);
+      try { fs.renameSync(file, `${file}.v${saved?.version}-${Date.now()}`); } catch {}
+      return null;
     } catch (err) {
       if (err.code === 'ENOENT') return null;
       logErr(`stats: could not read ${file} (${err.message}); starting fresh, old file kept as .bad`);
@@ -134,19 +142,30 @@ export function createStats({ file, ownHosts, saveMs = 30_000, keepDays = 400, l
   return {
     isInternal,
 
-    // An HTML page was served: 200, or 304 when the browser already had it.
-    pageView(req, pathname, query, ip, status) {
+    // The server sent an HTML page (200, or 304 when the browser had it cached).
+    // Only a raw "requests" figure: bots often fetch pages without running them.
+    htmlRequest(req, status) {
       if (req.method !== 'GET' || (status !== 200 && status !== 304)) return;
       if (/prefetch|prerender/i.test(req.headers['sec-purpose'] || req.headers.purpose || '')) return;
+      if (isInternal(req)) return;
+      const day = currentDay();
+      day.requests++;
+      if (!isHuman(req.headers['user-agent'] || '')) day.bots++;
+      dirty = true;
+    },
+
+    // A page's script ran in a browser (public/page.js): this is a page view.
+    // `path` is an existing page, already checked by the server.
+    pageBeacon(req, ip, { path: page, referrer, query }) {
       if (isInternal(req)) return;
       const ua = req.headers['user-agent'] || '';
       const day = currentDay();
       dirty = true;
-      if (!isHuman(ua)) { day.bots++; return; }
+      if (!isHuman(ua)) { day.bots++; return; } // headless tools that do run JavaScript
       day.pageViews++;
       if (MOBILE_UA.test(ua)) day.mobile++;
-      bump(day.pages, pathname);
-      const source = sourceOf(req, query, ownHosts);
+      bump(day.pages, page);
+      const source = sourceOf(referrer, query, ownHosts);
       if (source) bump(day.sources, source);
       countVisitor(day, ip, ua);
     },
@@ -262,7 +281,7 @@ function renderHtml(state) {
   const listRows = (counts) => sorted(counts).slice(0, 15).map(([k, n]) => `<tr><td>${esc(k)}</td><td>${num(n)}</td></tr>`).join('')
     || '<tr><td class="muted">Nothing yet</td><td></td></tr>';
 
-  const sinceLabel = new Date(`${sinceKey}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  const sinceLabel = new Date(state.since).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
   const asOf = new Date().toISOString().slice(11, 16);
 
   return `<!doctype html>
@@ -270,7 +289,7 @@ function renderHtml(state) {
 <meta name="robots" content="noindex, nofollow"><title>Visitor stats · Two Player Tetris</title><style>${CSS}</style></head>
 <body><main>
 <h1>Two Player Tetris visitors</h1>
-<p class="muted">Internal page. Counting since ${sinceLabel}. As of ${asOf} UTC. People only: bots and this browser are left out.</p>
+<p class="muted">Internal page. Counting since ${sinceLabel} UTC. As of ${asOf} UTC. People only: bots and this browser are left out.</p>
 <div class="scroll"><table>
 <tr><th></th><th>Visitors</th><th>Page views</th><th>Game opened</th><th>Friend joined</th><th>Rounds</th></tr>
 ${summaryRows}
@@ -285,7 +304,8 @@ ${dailyRows}
 <section><h2>Pages (30 days)</h2><table>${listRows(month.pages)}</table></section>
 </div>
 <h2>What the columns mean</h2>
-<p class="muted">Visitors: different people per day; the multi-day rows add the days up. Game opened: the game connected to the server. Friend joined: a second player came into a room, so two people played together. Rounds: games started with two players, restarts included. Bots seen in 30 days: ${num(month.bots)}.</p>
+<p class="muted">Visitors: different people per day; the multi-day rows add the days up. Page views: pages that actually ran in a browser. Game opened: the game connected to the server. Friend joined: a second player came into a room, so two people played together. Rounds: games started with two players, restarts included.</p>
+<p class="muted">Bot check, last 30 days: the server sent ${num(month.requests)} pages, but only ${num(month.pageViews)} ran in a real browser. The rest were crawlers, scanners and link checkers (${num(month.bots)} named themselves as bots).</p>
 <p class="muted">Opening this page marks this browser as yours, so your own visits stop counting. Raw numbers: add &amp;format=json to this page's address.</p>
 </main></body></html>`;
 }
