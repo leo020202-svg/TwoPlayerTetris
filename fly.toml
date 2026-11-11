@@ -3,6 +3,14 @@ primary_region = "ams"
 
 [build]
 
+[env]
+  STATS_FILE = "/data/stats.json"
+
+# Keeps the internal visitor stats across deploys and restarts.
+[mounts]
+  source = "stats_data"
+  destination = "/data"
+
 [http_service]
   internal_port = 3000
   force_https = true

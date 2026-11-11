@@ -6,6 +6,7 @@ import zlib from 'zlib';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { WebSocketServer } from 'ws';
+import { createStats } from './stats.js';
 import {
   COLS, ROWS, COLOR_INDEX, TYPES,
   pieceCells, collides, ghostCells,
@@ -32,6 +33,15 @@ const CANONICAL_ORIGIN = process.env.CANONICAL_ORIGIN || 'https://twoplayertetri
 const CANONICAL_HOST = new URL(CANONICAL_ORIGIN).host;
 // Alternate hostnames that serve the same app; 301 them to the canonical origin.
 const REDIRECT_HOSTS = new Set([`www.${CANONICAL_HOST}`, 'twoplayertetris.fly.dev']);
+
+// Internal-only visitor counts (see stats.js). On Fly the file lives on the
+// stats_data volume, so the numbers survive deploys and restarts.
+const stats = createStats({
+  file: process.env.STATS_FILE || path.join(__dirname, 'data', 'stats.json'),
+  ownHosts: new Set([CANONICAL_HOST, 'twoplayertetris.fly.dev', 'localhost', '127.0.0.1']),
+  saveMs: Number(process.env.STATS_SAVE_MS) || 30_000,
+  logErr,
+});
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -172,6 +182,23 @@ function sendNotFound(req, res) {
   return 404;
 }
 
+// The internal stats report. Only reached with the right STATS_KEY.
+function sendStats(req, res, query) {
+  const report = stats.report(query.get('format'));
+  res.writeHead(200, {
+    ...SECURITY_HEADERS,
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    'Referrer-Policy': 'no-referrer',
+    'X-Robots-Tag': 'noindex, nofollow',
+    'Cache-Control': 'no-store',
+    'Content-Type': report.type,
+    // Marks the owner's browser so their own visits stop counting.
+    'Set-Cookie': 'tpt_internal=1; Max-Age=31536000; Path=/; HttpOnly; Secure; SameSite=Lax',
+  });
+  res.end(req.method === 'HEAD' ? undefined : report.body);
+  return 200;
+}
+
 // ---- Feedback form -> email ------------------------------------------------
 // The recipient lives only in the FEEDBACK_TO secret so it never appears in the
 // page or this (public) repo. Without SMTP settings, feedback is written to the
@@ -307,10 +334,20 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (pathname === '/stats') {
+    // Without the key this is an ordinary 404. Only the path is logged, never the key.
+    const status = stats.keyOk(searchParams.get('key')) ? sendStats(req, res, searchParams) : sendNotFound(req, res);
+    logLine(`http ${status} ${req.method} ${pathname} ip=${ip}`);
+    return;
+  }
+
   const route = resolvePath(pathname);
   let status;
   if (route?.redirect) { sendRedirect(res, route.redirect + search); status = 301; }
-  else if (route?.asset) status = sendAsset(req, res, route.asset, searchParams);
+  else if (route?.asset) {
+    status = sendAsset(req, res, route.asset, searchParams);
+    if (route.asset.ext === '.html') stats.pageView(req, pathname, searchParams, ip, status);
+  }
   else status = sendNotFound(req, res);
   logLine(`http ${status} ${req.method} ${pathname} ip=${ip} ua="${(req.headers['user-agent']||'').slice(0,60)}"`);
 });
@@ -876,8 +913,14 @@ function startGame(room) {
     room.garbageInterval = setInterval(() => raiseGarbage(room), GARBAGE_INTERVAL_MS);
   }
 
+  if (!roomIsInternal(room)) stats.roundStarted();
   logRoom(room, `game started mode=${room.mode} players=${room.order.length} silhouette=${room.silhouette?.name || '-'} tickMs=${tickSpeedMs(room)}`);
   broadcast(room);
+}
+
+// Rooms with the owner's own browser in them don't count toward the stats.
+function roomIsInternal(room) {
+  return room.order.some((id) => room.sockets[id]?.internal);
 }
 
 function stopGame(room) {
@@ -958,6 +1001,8 @@ wss.on('connection', (ws, req) => {
   const playerId = String(nextPlayerId++);
   ws.playerId = playerId;
   ws.connectIp = (req?.headers?.['fly-client-ip']) || req?.socket?.remoteAddress || '?';
+  ws.internal = stats.isInternal(req);
+  stats.gameLoad(req, ws.connectIp, ws.internal);
 
   const room = createRoom();
   addPlayerToRoom(room, ws, playerId);
@@ -993,6 +1038,7 @@ wss.on('connection', (ws, req) => {
       deleteRoomIfEmpty(currentRoom);
       addPlayerToRoom(targetRoom, ws, playerId);
       sendWelcome(ws, targetRoom, playerId);
+      if (targetRoom.order.length === 2 && !roomIsInternal(targetRoom)) stats.friendJoined();
       logLine(`player=${playerId} joined room=${targetRoom.code} slot=${targetRoom.order.indexOf(playerId)} (left room=${oldCode})`);
       if (targetRoom.order.length === 2 && !targetRoom.running && !targetRoom.gameOver) {
         startGame(targetRoom);
@@ -1115,3 +1161,12 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   logErr(`unhandledRejection: ${reason}`);
 });
+
+// Fly stops the machine with SIGINT on deploys and restarts: save the counts first.
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    stats.flush();
+    logLine(`${signal}: stats saved, shutting down`);
+    process.exit(0);
+  });
+}
